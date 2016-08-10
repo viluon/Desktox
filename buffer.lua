@@ -66,13 +66,25 @@ end
 -- @return buffer	The new buffer
 function buffer.new( x, y, width, height, parent, colour )
 	local n = setmetatable( {}, buffer_metatable )
+	colour = colour or colours.white
 
 	-- Prefill the buffer with pixels of the chosen colour or white
 	for y = 0, height - 1 do
 		for x = 0, width - 1 do
-			n[ y * width + x ] = colour or colours.white
+			n[ y * width + x ] = colour
 		end
 	end
+
+	-- Copy the buffer methods to this instance
+	for k, fn in pairs( buffer_methods ) do
+		n[ k ] = fn
+	end
+
+	n.x = x
+	n.y = y
+	n.width = width
+	n.height = height
+	n.parent = parent
 
 	return n
 end
