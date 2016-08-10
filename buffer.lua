@@ -7,18 +7,57 @@ local buffer_methods = {}
 local buffer_metatable = {}
 
 --- Resize the buffer
--- @param width		The desired new width
--- @param height	The desired new height
+-- @param width		(Optional) The desired new width, defaults to self.width
+-- @param height	(Optional) The desired new height, defaults to self.height
+-- @param colour	(Optional) The colour to set any new pixels to, defaults to white
 -- @return self
-function buffer_methods:resize( width, height )
-	local insert = table.insert()
-	local black = colours.black
+function buffer_methods:resize( width, height, colour )
+	local insert = table.insert
+	local remove = table.remove
 
-	-- Loop through all lines, inserting black pixels at the end
-	for y = 1, self.height do
-		--TODO
+	local self_width = self.width
+	local self_height = self.height
+	local n_self = #self
+
+	colour = colour or colours.white
+	width = width or self_width
+	height = height or self_height
+
+	-- Loop through all lines
+	for y = math.min( self_height, height ) - 1, 0, -1 do
+		if width > self_width then
+			local line_offset = y * self_width
+
+			-- Insert pixels at the end of the line
+			for x = 0, width - self_width - 1 do
+				insert( self, line_offset, colour )
+				n_self = n_self + 1
+			end
+
+		elseif width < self_width then
+			local line_offset = y * width
+
+			-- Drop the pixels exceeding new width
+			for x = 0, self_width - width - 1 do
+				remove( self, line_offset, colour )
+				n_self = n_self - 1
+			end			
+		end
 	end
-	
+
+	if height > self_height then
+		-- Insert blank lines
+		for i = n_self, width * height - 1 do
+			self[ i ] = colour
+		end
+
+	elseif height < self_height then
+		-- Drop extra lines
+		for i = width * height - 1, n_self do
+			self[ i ] = nil
+		end
+	end
+
 	self.width = width
 	self.height = height
 
@@ -43,7 +82,7 @@ function buffer_methods:map( fn )
 end
 
 --- Clone the buffer into a new object
--- @param data		(Optional) The data of the new clone
+-- @param data		(Optional) The data of the new clone, defaults to self
 -- @return buffer	The new buffer, a clone of self
 function buffer_methods:clone( data )
 	local clone = buffer.new( self.x, self.y, self.width, self.height, self.parent )
@@ -54,6 +93,39 @@ function buffer_methods:clone( data )
 	end
 
 	return clone
+end
+
+--- Render the buffer to another buffer
+-- @param target	(Optional) The buffer to render to, defaults to self.parent
+-- @param x			(Optional) The x coordinate, 0-based, defaults to self.x
+-- @param y			(Optional) The y coordinate, 0-based, defaults to self.y
+-- @return self
+function buffer_methods:render( target )
+	target = target or self.parent
+
+	return self
+end
+
+--- Render the buffer to a CraftOS window object
+-- @param target	The window to render to
+-- @param x			(Optional) The x coordinate, 1-based, defaults to self.x + 1
+-- @param y			(Optional) The y coordinate, 1-based, defaults to self.y + 1
+-- @return self
+function buffer_methods:render_to_window( target, x, y )
+	x = x or self.x
+	y = y or self.y
+
+	-- Render each pixel separately
+	--TODO: Rewrite with window.blit()
+	for _y = 0, self.height - 1 do
+		for _x = 0, self.width - 1 do
+			target.setCursorPos( _x + x + 1, _y + y + 1 )
+			target.setBackgroundColour( self[ _y * self.width + _x ] )
+			target.write( " " )
+		end
+	end
+
+	return self
 end
 
 --- Create a new buffer
@@ -88,5 +160,7 @@ function buffer.new( x, y, width, height, parent, colour )
 
 	return n
 end
+
+buffer.clone = buffer_methods.clone
 
 return buffer
