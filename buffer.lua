@@ -6,6 +6,12 @@ local buffer = {}
 local buffer_methods = {}
 local buffer_metatable = {}
 
+-- Constants
+local TRANSPARENT = 0x0
+
+-- Error messages
+local unable_to_set_optional_argument = "Unable to set optional argument "
+
 --- Resize the buffer
 -- @param width		(Optional) The desired new width, defaults to self.width
 -- @param height	(Optional) The desired new height, defaults to self.height
@@ -97,11 +103,38 @@ end
 
 --- Render the buffer to another buffer
 -- @param target	(Optional) The buffer to render to, defaults to self.parent
--- @param x			(Optional) The x coordinate, 0-based, defaults to self.x
--- @param y			(Optional) The y coordinate, 0-based, defaults to self.y
+-- @param x			(Optional) The x coordinate to render self at, 0-based, defaults to self.x
+-- @param y			(Optional) The y coordinate to render self at, 0-based, defaults to self.y
+-- @param start_x	(Optional) The x coordinate on self to start rendering from, 0-based, defaults to 0
+-- @param start_y	(Optional) The y coordinate on self to start rendering from, 0-based, defaults to 0
+-- @param end_x		(Optional) The x coordinate on self to stop rendering at, 0-based, defaults to self.width - 1
+-- @param end_y		(Optional) The y coordinate on self to stop rendering at, 0-based, defaults to self.height - 1
 -- @return self
-function buffer_methods:render( target )
-	target = target or self.parent
+function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
+	target = target or self.parent or error( unable_to_set_optional_argument .. "'target': self.parent is nil", 2 )
+	x      = x      or self.x      or error( unable_to_set_optional_argument .. "'x': self.x is nil", 2 )
+	y      = y      or self.y      or error( unable_to_set_optional_argument .. "'y': self.y is nil", 2 )
+
+	start_x = start_x or 0
+	start_y = start_y or 0
+	end_x = end_x or self.width - 1
+	end_y = end_y or self.height - 1
+
+	-- Loop through all coordinates
+	for _y = start_y, end_y do
+		local target_offset = ( _y + y ) * target.width + x
+		local local_offset  = _y * self.width
+
+		for _x = start_x, end_x do
+			local pixel = self[ local_offset + _x ]
+
+			-- Ignore transparent colour
+			if pixel ~= TRANSPARENT then
+				-- Set the pixel in target
+				target[ target_offset + _x ] = pixel
+			end
+		end
+	end
 
 	return self
 end
@@ -120,6 +153,11 @@ function buffer_methods:render_to_window( target, x, y )
 	for _y = 0, self.height - 1 do
 		for _x = 0, self.width - 1 do
 			target.setCursorPos( _x + x + 1, _y + y + 1 )
+
+			if not self[ _y * self.width + _x ] then
+				error( "No pixel at " .. _x .. ":" .. _y, 2 )
+			end
+
 			target.setBackgroundColour( self[ _y * self.width + _x ] )
 			target.write( " " )
 		end
@@ -129,16 +167,19 @@ function buffer_methods:render_to_window( target, x, y )
 end
 
 --- Create a new buffer
--- @param x			The x coordinate of the buffer in parent, 0-based
--- @param y			The y coordinate of the buffer in parent, 0-based
--- @param width		The width of the buffer
--- @param height	The height of the buffer
+-- @param x			(Optional) The x coordinate of the buffer in parent, 0-based, defaults to 0
+-- @param y			(Optional) The y coordinate of the buffer in parent, 0-based, defaults to 0
+-- @param width		(Optional) The width of the buffer, defaults to 0
+-- @param height	(Optional) The height of the buffer, defaults to 0
 -- @param parent	This buffer's render target
 -- @param colour	(Optional) The colour to prefill the buffer with, defaults to white
 -- @return buffer	The new buffer
 function buffer.new( x, y, width, height, parent, colour )
 	local n = setmetatable( {}, buffer_metatable )
 	colour = colour or colours.white
+
+	width = width or 0
+	height = height or 0
 
 	-- Prefill the buffer with pixels of the chosen colour or white
 	for y = 0, height - 1 do
@@ -152,11 +193,14 @@ function buffer.new( x, y, width, height, parent, colour )
 		n[ k ] = fn
 	end
 
-	n.x = x
-	n.y = y
+	n.x = x or 0
+	n.y = y or 0
 	n.width = width
 	n.height = height
 	n.parent = parent
+
+	-- Metadata
+	n.__type = "buffer"
 
 	return n
 end
