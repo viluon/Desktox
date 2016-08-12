@@ -1,6 +1,6 @@
 
 -- Desktox, graphics stuff by @viluon
--- In case you'd forgot, pixels are stored as { background_colour, text_colour, character }
+-- In case you'd forget, pixels are stored as { background_colour, text_colour, character }
 
 local buffer = {}
 
@@ -27,24 +27,24 @@ local table = table
 local colours = colours
 
 local colour_lookup = {
-	[ colours.white ]			= "0";
-	[ colours.orange ]			= "1";
-	[ colours.magenta ]			= "2";
-	[ colours.lightBlue ]		= "3";
-	[ colours.yellow ]			= "4";
-	[ colours.lime ]			= "5";
-	[ colours.pink ]			= "6";
-	[ colours.grey ]			= "7";
-	[ colours.lightGrey ]		= "8";
-	[ colours.cyan ]			= "9";
-	[ colours.purple ]			= "a";
-	[ colours.blue ]			= "b";
-	[ colours.brown ]			= "c";
-	[ colours.green ]			= "d";
-	[ colours.red ]				= "e";
-	[ colours.black ]			= "f";
-	[ TRANSPARENT_BACKGROUND ]	= "g";
-	[ TRANSPARENT_FOREGROUND ]	= "h";
+	[ colours.white ]          = "0";
+	[ colours.orange ]         = "1";
+	[ colours.magenta ]        = "2";
+	[ colours.lightBlue ]      = "3";
+	[ colours.yellow ]         = "4";
+	[ colours.lime ]           = "5";
+	[ colours.pink ]           = "6";
+	[ colours.grey ]           = "7";
+	[ colours.lightGrey ]      = "8";
+	[ colours.cyan ]           = "9";
+	[ colours.purple ]         = "a";
+	[ colours.blue ]           = "b";
+	[ colours.brown ]          = "c";
+	[ colours.green ]          = "d";
+	[ colours.red ]            = "e";
+	[ colours.black ]          = "f";
+	[ TRANSPARENT_BACKGROUND ] = "g";
+	[ TRANSPARENT_FOREGROUND ] = "h";
 }
 
 -- Reverse lookup
@@ -54,6 +54,23 @@ end
 
 -- Error messages
 local unable_to_set_optional_argument = "Unable to set optional argument "
+
+-- Utility functions
+
+--- Get the maximum value out of a and b.
+--	Unlike math.max, only supports 2 arguments,
+--	but returns the second-in-value number as
+--	the second value.
+-- @param a	The first number to compare
+-- @param b	The second number to compare
+-- @return a and b, whichever is greater in value goes first.
+local function max( a, b )
+	if a > b then
+		return a, b
+	end
+
+	return b, a
+end
 
 --- Resize the buffer.
 -- @param width		(Optional) The desired new width, defaults to self.width
@@ -167,6 +184,8 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 	end_x = end_x or self.width - 1
 	end_y = end_y or self.height - 1
 
+	local false_parent = { parent = target }
+
 	-- Loop through all coordinates
 	for _y = start_y, end_y do
 		local target_offset = ( _y + y ) * target.width + x
@@ -180,7 +199,7 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 
 			-- Set the pixel in target, resolving transparency along the way
 			if pixel1 < 0 or pixel2 < 0 or pixel3 == TRANSPARENT_CHARACTER then
-				local local_parent = target
+				local local_parent = false_parent
 
 				local background_colour = pixel1
 				local foreground_colour = pixel2
@@ -194,17 +213,34 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 					local_parent = local_parent.parent
 
 					if not local_parent then
+						-- We've reached the very bottom of the family stack, without luck
 						background_colour = DEFAULT_BACKGROUND
 						break
 					end
 
+					-- All buffers have a position, we have to keep track of that
 					tracked_offset_x = tracked_offset_x + local_parent.x
 					tracked_offset_y = tracked_offset_y + local_parent.y
 
-					background_colour = local_parent[ ( _y + tracked_offset_y ) * local_parent.width + tracked_offset_x + _x ][ 1 ]
+					local actual_y = _y + tracked_offset_y
+					local actual_x = _x + tracked_offset_x
+					local p_width = local_parent.width
+					local p_height = local_parent.height
+
+					-- Check that we are within bounds
+					if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
+						-- We can't get a pixel out of bounds of this parent, so we'll just roll with
+						-- the default colour.
+						--TODO: Would it be better if we'd look for any parent that *is* within bounds instead?
+						background_colour = DEFAULT_BACKGROUND
+						break
+					end
+
+					background_colour = local_parent[ actual_y * p_width + actual_x ][ 1 ]
 				end
 
-				local_parent = target
+				-- The same goes for foreground colour...
+				local_parent = false_parent
 				tracked_offset_x = x
 				tracked_offset_y = y
 				while foreground_colour < 0 do
@@ -218,10 +254,21 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 					tracked_offset_x = tracked_offset_x + local_parent.x
 					tracked_offset_y = tracked_offset_y + local_parent.y
 
-					foreground_colour = local_parent[ ( _y + tracked_offset_y ) * local_parent.width + tracked_offset_x + _x ][ 2 ]
+					local actual_y = _y + tracked_offset_y
+					local actual_x = _x + tracked_offset_x
+					local p_width = local_parent.width
+					local p_height = local_parent.height
+
+					if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
+						foreground_colour = DEFAULT_FOREGROUND
+						break
+					end
+
+					foreground_colour = local_parent[ actual_y * p_width + actual_x ][ 2 ]
 				end
 
-				local_parent = target
+				-- ...And finally for the character.
+				local_parent = false_parent
 				tracked_offset_x = x
 				tracked_offset_y = y
 				while character == TRANSPARENT_CHARACTER do
@@ -235,21 +282,40 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 					tracked_offset_x = tracked_offset_x + local_parent.x
 					tracked_offset_y = tracked_offset_y + local_parent.y
 
-					character = local_parent[ ( _y + tracked_offset_y ) * local_parent.width + tracked_offset_x + _x ][ 3 ]
+					local actual_y = _y + tracked_offset_y
+					local actual_x = _x + tracked_offset_x
+					local p_width = local_parent.width
+					local p_height = local_parent.height
+
+					if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
+						character = DEFAULT_CHARACTER
+						break
+					end
+
+					character = local_parent[ actual_y * p_width + actual_x ][ 3 ]
 				end
 
+				-- Now that we're certain we have non-transparent data, store them in a pixel
+				-- We *could* use -1 and -2 indices, but there will be a lot of cases where
+				-- one or both of them aren't used. Because creating arrays is faster
+				-- (array creation can utilise SETLIST while table creation can only use
+				-- SETTABLE) and this assignment has to be done for *all cases*, we'll limit
+				-- the math to the target[ index ] assignment down below.
 				local underneath = {
 					background_colour;
 					foreground_colour;
 					character;
 				}
 
+				-- Assign the proper data to the rendered pixel
 				target[ index ] = {
 					pixel1 > 0 and pixel1 or underneath[ -pixel1 ];
 					pixel2 > 0 and pixel2 or underneath[ -pixel2 ];
 					pixel3 == TRANSPARENT_CHARACTER and underneath[ 3 ] or pixel3;
 				}
 			else
+				-- That was quick! This is a speed up for the large number of cases
+				-- in which no transparency is used
 				target[ index ] = {
 					pixel1;
 					pixel2;
@@ -365,12 +431,16 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 	function win.write( text )
 		local x = cursor_x
 
+		local line_offset = ( cursor_y - 1 ) * width - 1
+		local sub = string.sub
+
 		for i = 1, #text do
 			if x > width then
 				break
 			end
 
-			self[ ( cursor_y - 1 ) * width + x - 1 ] = { background_colour, text_colour, text:sub( i, i ) }
+			-- A -1 for x is included in line_offset
+			self[ line_offset + x ] = { background_colour, text_colour, sub( text, i, i ) }
 			x = x + 1
 		end
 
@@ -514,7 +584,7 @@ end
 
 --- Scroll the buffer contents.
 -- @param lines		The number of lines to scroll
--- @param colour	(Optional) The colour to fill any empty pixels with, defaults to white
+-- @param colour	(Optional) The colour to fill any empty pixels with, defaults to DEFAULT_BACKGROUND
 -- @return self
 function buffer_methods:scroll( lines, colour )
 	lines = tonumber( lines ) or error( "Expected number for 'lines'", 2 )
@@ -577,9 +647,9 @@ function buffer_methods:clear( background_colour, foreground_colour, character )
 	local n_self = #self
 
 	local clear_pixel = {
-		background_colour	or DEFAULT_BACKGROUND;
-		foreground_colour	or DEFAULT_FOREGROUND;
-		character			or DEFAULT_CHARACTER;
+		background_colour or DEFAULT_BACKGROUND;
+		foreground_colour or DEFAULT_FOREGROUND;
+		character         or DEFAULT_CHARACTER;
 	}
 
 	-- Go through all pixels and set them to the clear pixel
@@ -595,8 +665,10 @@ end
 -- @param background_colour	(Optional) The background colour to clear with, defaults to DEFAULT_BACKGROUND
 -- @param foreground_colour	(Optional) The foreground colour to clear with, defaults to DEFAULT_FOREGROUND
 -- @param character			(Optional) The character to clear with, defaults to DEFAULT_CHARACTER
+-- @param start_x			(Optional) The x coordinate to start clearing on, 0-based, defaults to 0
+-- @param end_x				(Optional) The x coordinate to stop clearing on, 0-based, defaults to self.width - 1
 -- @return self
-function buffer_methods:clear_line( y, background_colour, foreground_colour, character )
+function buffer_methods:clear_line( y, background_colour, foreground_colour, character, start_x, end_x )
 	y = tonumber( y ) or error( "Expected number for 'y'", 2 )
 
 	if y < 0 or y > self.height then
@@ -606,13 +678,50 @@ function buffer_methods:clear_line( y, background_colour, foreground_colour, cha
 	local clear_pixel = {
 		background_colour or DEFAULT_BACKGROUND;
 		foreground_colour or DEFAULT_FOREGROUND;
-		character or DEFAULT_CHARACTER;
+		character         or DEFAULT_CHARACTER;
 	}
 
 	local w = self.width
 
+	start_x = tonumber( start_x ) or 0
+	end_x = tonumber( end_x ) or w - 1
+
 	-- Go through all pixels on this line and set them to clear_pixel
-	for x = 0, w - 1 do
+	for x = start_x, end_x do
+		self[ y * w + x ] = clear_pixel
+	end
+
+	return self
+end
+
+--- Clear a column of the buffer.
+-- @param x					The x coordinate indicating the column to clear, 0-based
+-- @param background_colour	(Optional) The background colour to clear with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to clear with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to clear with, defaults to DEFAULT_CHARACTER
+-- @param start_y			(Optional) The y coordinate to start clearing on, 0-based, defaults to 0
+-- @param end_y				(Optional) The y coordinate to stop clearing on, 0-based, defaults to self.height - 1
+-- @return self
+function buffer_methods:clear_column( x, background_colour, foreground_colour, character, start_y, end_y )
+	x = tonumber( x ) or error( "Expected number for 'x'", 2 )
+
+	local w = self.width
+
+	if x < 0 or x > w then
+		return self
+	end
+
+	local clear_pixel = {
+		background_colour or DEFAULT_BACKGROUND;
+		foreground_colour or DEFAULT_FOREGROUND;
+		character         or DEFAULT_CHARACTER;
+	}
+
+	start_y = tonumber( start_y ) or 0
+	end_y = tonumber( end_y ) or self.height - 1
+
+	-- Go through all pixels in this column and set them to clear_pixel
+	for y = start_y, end_y do
 		self[ y * w + x ] = clear_pixel
 	end
 
@@ -620,11 +729,13 @@ function buffer_methods:clear_line( y, background_colour, foreground_colour, cha
 end
 
 --- Write text to the buffer using the specified colours.
+--	text, background_colours and foreground_colours have to
+--	be of the same length
 -- @param x						The x coordinate to write at, 0-based
 -- @param y						The y coordinate to write at, 0-based
 -- @param text					The text to write
--- @param background_colours	The background colours to use
--- @param foreground_colours	The foreground colours to use
+-- @param background_colours	The background colours to use, in paint format (characters)
+-- @param foreground_colours	The foreground colours to use, in paint format (characters)
 -- @return self
 function buffer_methods:blit( x, y, text, background_colours, foreground_colours )
 	--TODO: Checks that all arguments are of the correct format
@@ -643,25 +754,98 @@ function buffer_methods:blit( x, y, text, background_colours, foreground_colours
 	return self
 end
 
+--- Draw a filled, solid colour(&character) rectangle, using two points.
+--	The order of the two points does not matter, i.e. 2:2, 1:1 is the same
+--	as 1:1, 2:2
+-- @param start_x			The x coordinate to start drawing at, 0-based
+-- @param start_y			The y coordinate to start drawing at, 0-based
+-- @param end_x				The x coordinate to end drawing at, 0-based
+-- @param end_y				The y coordinate to end drawing at, 0-based
+-- @param background_colour	(Optional) The background colour to fill the rectangle (including borders) with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to fill the rectangle (including borders) with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to fill the rectangle (including borders) with, defaults to DEFAULT_CHARACTER
+-- @return self
+function buffer_methods:draw_filled_rectangle_using_points( start_x, start_y, end_x, end_y, background_colour, foreground_colour, character )
+	local w = self.width
+
+	-- Starting values must be smaller than ending ones
+	end_x, start_x = max( start_x, end_x )
+	end_y, start_y = max( start_y, end_y )
+
+	local new_pixel = {
+		background_colour or DEFAULT_BACKGROUND;
+		foreground_colour or DEFAULT_FOREGROUND;
+		character         or DEFAULT_CHARACTER;
+	}
+
+	-- Go through all pixels of this rectangle and set them to new_pixel
+	for y = start_y, end_y do
+		for x = start_x, end_x do
+			self[ y * w + x ] = new_pixel
+		end
+	end
+
+	return self
+end
+
+--- Draw a filled, solid colour(&character) rectangle, using one point, width and height.
+-- @param x					The x coordinate to start drawing at, 0-based
+-- @param y					The y coordinate to start drawing at, 0-based
+-- @param width				The width of the rectangle
+-- @param height			The height of the rectangle
+-- @param background_colour	(Optional) The background colour to fill the rectangle (including borders) with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to fill the rectangle (including borders) with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to fill the rectangle (including borders) with, defaults to DEFAULT_CHARACTER
+-- @return self
+function buffer_methods:draw_filled_rectangle( x, y, width, height, background_colour, foreground_colour, character )
+	local w = self.width
+	local end_x = x + width - 1
+
+	local new_pixel = {
+		background_colour or DEFAULT_BACKGROUND;
+		foreground_colour or DEFAULT_FOREGROUND;
+		character         or DEFAULT_CHARACTER;
+	}
+
+	-- Go through all pixels of this rectangle and set them to new_pixel
+	for y = y, y + height - 1 do
+		for x = x, end_x do
+			self[ y * w + x ] = new_pixel
+		end
+	end
+
+	return self
+end
+
 --- Create a new buffer.
--- @param x			(Optional) The x coordinate of the buffer in parent, 0-based, defaults to 0
--- @param y			(Optional) The y coordinate of the buffer in parent, 0-based, defaults to 0
--- @param width		(Optional) The width of the buffer, defaults to 0
--- @param height	(Optional) The height of the buffer, defaults to 0
--- @param parent	This buffer's render target
--- @param colour	(Optional) The colour to prefill the buffer with, defaults to white
--- @return buffer	The new buffer
-function buffer.new( x, y, width, height, parent, colour )
+-- @param x					(Optional) The x coordinate of the buffer in parent, 0-based, defaults to 0
+-- @param y					(Optional) The y coordinate of the buffer in parent, 0-based, defaults to 0
+-- @param width				(Optional) The width of the buffer, defaults to 0
+-- @param height			(Optional) The height of the buffer, defaults to 0
+-- @param parent			This buffer's render target
+-- @param background_colour	(Optional) The background colour to prefill the buffer with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to prefill the buffer with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to prefill the buffer with, defaults to DEFAULT_CHARACTER
+-- @param no_prefill		(Optional) Disable prefilling of the buffer, defaults to false
+-- @return buffer			The new buffer
+function buffer.new( x, y, width, height, parent, background_colour, foreground_colour, character, no_prefill )
 	local n = setmetatable( {}, buffer_metatable )
-	colour = colour or DEFAULT_BACKGROUND
 
 	width = width or 0
 	height = height or 0
 
-	-- Prefill the buffer with pixels of the chosen colour or white
-	for y = 0, height - 1 do
-		for x = 0, width - 1 do
-			n[ y * width + x ] = { colour, DEFAULT_FOREGROUND, DEFAULT_CHARACTER }
+	local new_pixel = {
+		background_colour or DEFAULT_BACKGROUND;
+		foreground_colour or DEFAULT_FOREGROUND;
+		character         or DEFAULT_CHARACTER;
+	}
+
+	if not no_prefill then
+		-- Prefill the buffer with new_pixel
+		for y = 0, height - 1 do
+			for x = 0, width - 1 do
+				n[ y * width + x ] = new_pixel
+			end
 		end
 	end
 
@@ -683,5 +867,20 @@ function buffer.new( x, y, width, height, parent, colour )
 end
 
 buffer.clone = buffer_methods.clone
+
+--- Syntactic sugar for both :render() and :render_to_window().
+--	Will attempt to decide which of the 2 methods to use, based
+--	on self.parent and given arguments. Defaults to
+--	:render_to_window(). Should be *avoided* for best performance.
+-- @param target	The buffer or window to render to
+-- @param ...		Any arguments passed to :render() or :render_to_window()
+-- @return Tail call of :render() or :render_to_window()
+function buffer_metatable:__call( target, ... )
+	if self.parent or ( type( target ) == "table" and target.__type == "buffer" ) then
+		return self:render( target, ... )
+	else
+		return self:render_to_window( target, ... )
+	end
+end
 
 return buffer
