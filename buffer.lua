@@ -26,6 +26,8 @@ local math = math
 local table = table
 local colours = colours
 
+local floor = math.floor
+
 local colour_lookup = {
 	[ colours.white ]          = "0";
 	[ colours.orange ]         = "1";
@@ -72,12 +74,23 @@ local function max( a, b )
 	return b, a
 end
 
+--- Rounds a number to a set amount of decimal places.
+-- @param n			The number to round
+-- @param places 	The number of decimal places to keep
+-- @return The result
+local function round( n, places )
+	local mult = 10 ^ ( places or 0 )
+	return floor( n * mult + 0.5 ) / mult
+end
+
 --- Resize the buffer.
--- @param width		(Optional) The desired new width, defaults to self.width
--- @param height	(Optional) The desired new height, defaults to self.height
--- @param colour	(Optional) The colour to set any new pixels to, defaults to white
+-- @param width				(Optional) The desired new width, defaults to self.width
+-- @param height			(Optional) The desired new height, defaults to self.height
+-- @param background_colour	(Optional) The background colour to set any new pixels to, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to set any new pixels to, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to set any new pixels to, defaults to DEFAULT_CHARACTER
 -- @return self
-function buffer_methods:resize( width, height, colour )
+function buffer_methods:resize( width, height, background_colour, foreground_colour, character )
 	local insert = table.insert
 	local remove = table.remove
 
@@ -89,6 +102,12 @@ function buffer_methods:resize( width, height, colour )
 	width = width or self_width
 	height = height or self_height
 
+	local new_pixel = {
+		background_colour or DEFAULT_BACKGROUND;
+		foreground_colour or DEFAULT_FOREGROUND;
+		character         or DEFAULT_CHARACTER;
+	}
+
 	-- Loop through all lines
 	for y = math.min( self_height, height ) - 1, 0, -1 do
 		if width > self_width then
@@ -96,7 +115,7 @@ function buffer_methods:resize( width, height, colour )
 
 			-- Insert pixels at the end of the line
 			for x = 0, width - self_width - 1 do
-				insert( self, line_offset, { colour, DEFAULT_FOREGROUND, DEFAULT_CHARACTER } )
+				insert( self, line_offset, new_pixel )
 				n_self = n_self + 1
 			end
 
@@ -114,7 +133,7 @@ function buffer_methods:resize( width, height, colour )
 	if height > self_height then
 		-- Insert blank lines
 		for i = n_self, width * height - 1 do
-			self[ i ] = { colour, DEFAULT_FOREGROUND, DEFAULT_CHARACTER }
+			self[ i ] = new_pixel
 		end
 
 	elseif height < self_height then
@@ -232,6 +251,8 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 						-- We can't get a pixel out of bounds of this parent, so we'll just roll with
 						-- the default colour.
 						--TODO: Would it be better if we'd look for any parent that *is* within bounds instead?
+						--      Probably not, the result isn't visible anyway since that part of self is outside
+						--		of the parent
 						background_colour = DEFAULT_BACKGROUND
 						break
 					end
@@ -754,7 +775,7 @@ function buffer_methods:blit( x, y, text, background_colours, foreground_colours
 	return self
 end
 
---- Draw a filled, solid colour(&character) rectangle, using two points.
+--- Draw a filled, solid colour rectangle using two points.
 --	The order of the two points does not matter, i.e. 2:2, 1:1 is the same
 --	as 1:1, 2:2
 -- @param start_x			The x coordinate to start drawing at, 0-based
@@ -788,7 +809,7 @@ function buffer_methods:draw_filled_rectangle_using_points( start_x, start_y, en
 	return self
 end
 
---- Draw a filled, solid colour(&character) rectangle, using one point, width and height.
+--- Draw a filled, solid colour rectangle using one point, width and height.
 -- @param x					The x coordinate to start drawing at, 0-based
 -- @param y					The y coordinate to start drawing at, 0-based
 -- @param width				The width of the rectangle
@@ -811,6 +832,153 @@ function buffer_methods:draw_filled_rectangle( x, y, width, height, background_c
 	for y = y, y + height - 1 do
 		for x = x, end_x do
 			self[ y * w + x ] = new_pixel
+		end
+	end
+
+	return self
+end
+
+--- Draw a solid colour rectangle border using two points.
+-- @param start_x			The x coordinate to start drawing at, 0-based
+-- @param start_y			The y coordinate to start drawing at, 0-based
+-- @param end_x				The x coordinate to end drawing at, 0-based
+-- @param end_y				The y coordinate to end drawing at, 0-based
+-- @param border_width		(Optional) The width of the border (larger values extending to the centre)
+-- @param background_colour	(Optional) The background colour to fill the rectangle border with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to fill the rectangle border with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to fill the rectangle border with, defaults to DEFAULT_CHARACTER
+-- @return self
+function buffer_methods:draw_rectangle_using_points( start_x, start_y, end_x, end_y, border_width,
+                                                     background_colour, foreground_colour, character )
+	local w = self.width
+	border_width = border_width or 1
+
+	-- Starting values must be smaller than ending ones
+	end_x, start_x = max( start_x, end_x )
+	end_y, start_y = max( start_y, end_y )
+
+	-- Go through all lines and columns of this rectangle and clear them with the desired data
+	-- (clear_line and clear_column will handle defaults for us)
+	for i = 0, border_width - 1 do
+		self:clear_line( start_y + i, background_colour, foreground_colour, character, start_x + i, end_x - i )
+	end
+
+	for i = 0, border_width - 1 do
+		self:clear_line( end_y - i, background_colour, foreground_colour, character, start_x + i, end_x - i )
+	end
+
+	-- Columns have a little less work, so that corners aren't painted twice
+	for i = 0, border_width - 1 do
+		self:clear_column( start_x + i, background_colour, foreground_colour, character, start_y + i + 1, end_y - i - 1 )
+	end
+
+	for i = 0, border_width - 1 do
+		self:clear_column( end_x - i, background_colour, foreground_colour, character, start_y + i + 1, end_y - i - 1 )
+	end
+
+	return self
+end
+
+--- Draw a solid colour rectangle border using one point, width and height.
+-- @param x					The x coordinate to start drawing at, 0-based
+-- @param y					The y coordinate to start drawing at, 0-based
+-- @param width				The width of the rectangle
+-- @param height			The height of the rectangle
+-- @param border_width		(Optional) The width of the border (larger values extending to the centre)
+-- @param background_colour	(Optional) The background colour to fill the rectangle border with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to fill the rectangle border with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to fill the rectangle border with, defaults to DEFAULT_CHARACTER
+-- @return Tail call of self:draw_rectangle_using_points(), resulting in self
+function buffer_methods:draw_rectangle( x, y, width, height, border_width, background_colour, foreground_colour, character )
+	return self
+	:draw_rectangle_using_points( x, y, x + width - 1, y + height - 1, border_width, background_colour, foreground_colour, character )
+end
+
+--- Draw a circle outline using the centre point and radius, without corrections for CC rectangular pixels.
+-- @param centre_x			The x coordinate of the circle's centre
+-- @param centre_y			The y coordinate of the circle's centre
+-- @param radius			The radius of the circle
+-- @param background_colour	(Optional) The background colour to fill the circle outline with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to fill the circle outline with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to fill the circle outline with, defaults to DEFAULT_CHARACTER
+-- @return self
+function buffer_methods:draw_circle_raw( centre_x, centre_y, radius, background_colour, foreground_colour, character )
+	local w = self.width
+
+	local new_pixel = {
+		background_colour or DEFAULT_BACKGROUND;
+		foreground_colour or DEFAULT_FOREGROUND;
+		character         or DEFAULT_CHARACTER;
+	}
+
+	local x = radius
+	local y = 0
+	local err = 0
+
+	-- Generate points for the first octant, going counterclockwise
+	-- and mirroring them to other octants
+	while x >= y do
+		self[ ( centre_y + y ) * w + centre_x + x ] = new_pixel
+		self[ ( centre_y + x ) * w + centre_x + y ] = new_pixel
+		self[ ( centre_y + x ) * w + centre_x - y ] = new_pixel
+		self[ ( centre_y + y ) * w + centre_x - x ] = new_pixel
+		self[ ( centre_y - y ) * w + centre_x - x ] = new_pixel
+		self[ ( centre_y - x ) * w + centre_x - y ] = new_pixel
+		self[ ( centre_y - x ) * w + centre_x + y ] = new_pixel
+		self[ ( centre_y - y ) * w + centre_x + x ] = new_pixel
+
+		y = y + 1
+		err = err + 1 + 2 * y
+
+		if 2 * ( err - x ) + 1 > 0 then
+			x = x - 1
+			err = err + 1 - 2 * x
+		end
+	end
+
+	return self
+end
+
+--- Draw a circle outline using the centre point and radius, with corrections for CC rectangular pixels.
+-- @param centre_x			The x coordinate of the circle's centre
+-- @param centre_y			The y coordinate of the circle's centre
+-- @param radius			The radius of the circle
+-- @param background_colour	(Optional) The background colour to fill the circle outline with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to fill the circle outline with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to fill the circle outline with, defaults to DEFAULT_CHARACTER
+-- @return self
+function buffer_methods:draw_circle( centre_x, centre_y, radius, background_colour, foreground_colour, character )
+	--TODO: Add corrections!
+	local w = self.width
+
+	local new_pixel = {
+		background_colour or DEFAULT_BACKGROUND;
+		foreground_colour or DEFAULT_FOREGROUND;
+		character         or DEFAULT_CHARACTER;
+	}
+
+	local x = radius
+	local y = 0
+	local err = 0
+
+	-- Generate points for the first octant, going counterclockwise
+	-- and mirroring them to other octants
+	while x >= y do
+		self[ ( centre_y + y ) * w + centre_x + x ] = new_pixel
+		self[ ( centre_y + x ) * w + centre_x + y ] = new_pixel
+		self[ ( centre_y + x ) * w + centre_x - y ] = new_pixel
+		self[ ( centre_y + y ) * w + centre_x - x ] = new_pixel
+		self[ ( centre_y - y ) * w + centre_x - x ] = new_pixel
+		self[ ( centre_y - x ) * w + centre_x - y ] = new_pixel
+		self[ ( centre_y - x ) * w + centre_x + y ] = new_pixel
+		self[ ( centre_y - y ) * w + centre_x + x ] = new_pixel
+
+		y = y + 1
+		err = err + 1 + 2 * y
+
+		if 2 * ( err - x ) + 1 > 0 then
+			x = x - 1
+			err = err + 1 - 2 * x
 		end
 	end
 
