@@ -1,5 +1,9 @@
 
 -- Desktox, graphics stuff by @viluon
+--  This Source Code Form is subject to the terms of the Mozilla Public
+--  License, v. 2.0. If a copy of the MPL was not distributed with this
+--  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 -- In case you'd forget, pixels are stored as { background_colour, text_colour, character }
 
 local buffer = {}
@@ -21,6 +25,8 @@ local type = type
 local pairs = pairs
 local ipairs = ipairs
 local tonumber = tonumber
+local error = error
+
 local string = string
 local math = math
 local table = table
@@ -103,9 +109,9 @@ function buffer_methods:resize( width, height, background_colour, foreground_col
 	height = height or self_height
 
 	local new_pixel = {
-		background_colour or DEFAULT_BACKGROUND;
-		foreground_colour or DEFAULT_FOREGROUND;
-		character         or DEFAULT_CHARACTER;
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
 	}
 
 	-- Loop through all lines
@@ -153,6 +159,10 @@ end
 -- @param fn				The function to map with, given arguments self, x, y, pixel
 -- @return self, old_self	Self and the self state before mapping
 function buffer_methods:map( fn )
+	if type( fn ) ~= "function" then
+		error( "Expected function as 'fn'", 2 )
+	end
+
 	local w = self.width
 	local clone = self:clone()
 
@@ -173,12 +183,22 @@ function buffer_methods:clone( data )
 	local clone = buffer.new( self.x, self.y, self.width, self.height, self.parent )
 
 	-- Clone the pixel data
-	for i, pixel in ipairs( data or self ) do
-		clone[ i ] = {
-			pixel[ 1 ];
-			pixel[ 2 ];
-			pixel[ 3 ];
-		}
+	if data and type( data ) == "table" then
+		for i, pixel in ipairs( data ) do
+			clone[ i ] = {
+				pixel[ 1 ];
+				pixel[ 2 ];
+				pixel[ 3 ];
+			}
+		end
+	else
+		for pixel, x, y, index in self:iter() do
+			clone[ index ] = {
+				pixel[ 1 ];
+				pixel[ 2 ];
+				pixel[ 3 ];
+			}
+		end
 	end
 
 	return clone
@@ -198,23 +218,26 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 	x      = x      or self.x      or error( unable_to_set_optional_argument .. "'x': self.x is nil", 2 )
 	y      = y      or self.y      or error( unable_to_set_optional_argument .. "'y': self.y is nil", 2 )
 
+	local self_width = self.width
+	local target_width = target.width
+
 	start_x = start_x or 0
 	start_y = start_y or 0
-	end_x = end_x or self.width - 1
+	end_x = end_x or self_width - 1
 	end_y = end_y or self.height - 1
 
 	local false_parent = { parent = target }
 
 	-- Loop through all coordinates
 	for _y = start_y, end_y do
-		local target_offset = ( _y + y ) * target.width + x
-		local local_offset  = _y * self.width
+		local target_offset = ( _y + y ) * target_width + x
+		local local_offset  = _y * self_width
 
 		for _x = start_x, end_x do
 			local index = target_offset + _x
+			local pixel = self[ local_offset + _x ]
 
-			local pixel1,                         pixel2,                         pixel3
-			    = self[ local_offset + _x ][ 1 ], self[ local_offset + _x ][ 2 ], self[ local_offset + _x ][ 3 ]
+			local pixel1, pixel2, pixel3 = pixel[ 1 ], pixel[ 2 ], pixel[ 3 ]
 
 			-- Set the pixel in target, resolving transparency along the way
 			if pixel1 < 0 or pixel2 < 0 or pixel3 == TRANSPARENT_CHARACTER then
@@ -356,13 +379,14 @@ end
 -- @return self
 function buffer_methods:render_to_window( target, x, y )
 	x = x or self.x + 1
-	y = y or self.y + 1
+	y = y and y - 1 or self.y
 
 	local scp, blit = target.setCursorPos, target.blit
 
 	-- Go through all lines of the buffer
 	for i, line in ipairs( self:cook_lines() ) do
-		scp( x, y + i - 1 )
+		-- A -1 for i is included in the y definition above
+		scp( x, y + i )
 		blit( line[ 3 ], line[ 2 ], line[ 1 ] )
 	end
 
@@ -394,10 +418,6 @@ function buffer_methods:cook_lines( start_x, start_y, end_x, end_y )
 		-- Add the pixel data to the end of the line
 		for x = start_x, end_x do
 			local pixel = self[ line_offset + x ]
-
-			if not pixel then
-				error( x .. ":" .. y )
-			end
 
 			line[ 1 ] = line[ 1 ] .. colour_lookup[ pixel[ 1 ] ]
 			line[ 2 ] = line[ 2 ] .. colour_lookup[ pixel[ 2 ] ]
@@ -442,12 +462,12 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 
 	-- Retrieve information from parent
 	local cursor_blink = parent.getCursorBlink and parent.getCursorBlink() or false
-	local cursor_x, cursor_y = parent.getCursorPos()
-	cursor_x = cursor_x + x - 1
-	cursor_y = cursor_y + y - 1
 
 	local background_colour = parent.getBackgroundColour()
 	local text_colour = parent.getTextColour()
+
+	local cursor_x = 1
+	local cursor_y = 1
 
 	function win.write( text )
 		local x = cursor_x
@@ -456,7 +476,7 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 		local sub = string.sub
 
 		for i = 1, #text do
-			if x > width then
+			if x - 1 > width then
 				break
 			end
 
@@ -604,16 +624,22 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 end
 
 --- Scroll the buffer contents.
--- @param lines		The number of lines to scroll
--- @param colour	(Optional) The colour to fill any empty pixels with, defaults to DEFAULT_BACKGROUND
+-- @param lines				The number of lines to scroll
+-- @param background_colour	(Optional) The background colour to fill any empty pixels with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to fill any empty pixels with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to fill any empty pixels with, defaults to DEFAULT_CHARACTER
 -- @return self
-function buffer_methods:scroll( lines, colour )
+function buffer_methods:scroll( lines, background_colour, foreground_colour, character )
 	lines = tonumber( lines ) or error( "Expected number for 'lines'", 2 )
-	colour = tonumber( colour ) or DEFAULT_BACKGROUND
 
 	local n_self = #self
 	local width, height = self.width, self.height
-	local new_pixel = { colour, DEFAULT_FOREGROUND, DEFAULT_CHARACTER }
+
+	local new_pixel = { 
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
+	}
 
 	if lines > 0 then
 		local remove = table.remove
@@ -668,9 +694,9 @@ function buffer_methods:clear( background_colour, foreground_colour, character )
 	local n_self = #self
 
 	local clear_pixel = {
-		background_colour or DEFAULT_BACKGROUND;
-		foreground_colour or DEFAULT_FOREGROUND;
-		character         or DEFAULT_CHARACTER;
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
 	}
 
 	-- Go through all pixels and set them to the clear pixel
@@ -697,9 +723,9 @@ function buffer_methods:clear_line( y, background_colour, foreground_colour, cha
 	end
 
 	local clear_pixel = {
-		background_colour or DEFAULT_BACKGROUND;
-		foreground_colour or DEFAULT_FOREGROUND;
-		character         or DEFAULT_CHARACTER;
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
 	}
 
 	local w = self.width
@@ -733,9 +759,9 @@ function buffer_methods:clear_column( x, background_colour, foreground_colour, c
 	end
 
 	local clear_pixel = {
-		background_colour or DEFAULT_BACKGROUND;
-		foreground_colour or DEFAULT_FOREGROUND;
-		character         or DEFAULT_CHARACTER;
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
 	}
 
 	start_y = tonumber( start_y ) or 0
@@ -759,12 +785,19 @@ end
 -- @param foreground_colours	The foreground colours to use, in paint format (characters)
 -- @return self
 function buffer_methods:blit( x, y, text, background_colours, foreground_colours )
-	--TODO: Checks that all arguments are of the correct format
+	x = tonumber( x ) or error( "Expected number for 'x'", 2 )
+	y = tonumber( y ) or error( "Expected number for 'y'", 2 )
+
+	local text_length = #text
+
+	if text_length ~= #background_colours or text_length ~= #foreground_colours then
+		error( "'text', 'background_colours', and 'foreground_colours' all have to be of the same length", 2 )
+	end
 
 	local offset = y * self.width + x
 	local sub = string.sub
 
-	for i = 1, #text do
+	for i = 1, text_length do
 		self[ offset + i - 1 ] = {
 			colour_lookup[ sub( background_colours, i, i ) ];
 			colour_lookup[ sub( foreground_colours, i, i ) ];
@@ -794,9 +827,9 @@ function buffer_methods:draw_filled_rectangle_using_points( start_x, start_y, en
 	end_y, start_y = max( start_y, end_y )
 
 	local new_pixel = {
-		background_colour or DEFAULT_BACKGROUND;
-		foreground_colour or DEFAULT_FOREGROUND;
-		character         or DEFAULT_CHARACTER;
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
 	}
 
 	-- Go through all pixels of this rectangle and set them to new_pixel
@@ -823,9 +856,9 @@ function buffer_methods:draw_filled_rectangle( x, y, width, height, background_c
 	local end_x = x + width - 1
 
 	local new_pixel = {
-		background_colour or DEFAULT_BACKGROUND;
-		foreground_colour or DEFAULT_FOREGROUND;
-		character         or DEFAULT_CHARACTER;
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
 	}
 
 	-- Go through all pixels of this rectangle and set them to new_pixel
@@ -895,8 +928,8 @@ function buffer_methods:draw_rectangle( x, y, width, height, border_width, backg
 end
 
 --- Draw a circle outline using the centre point and radius, without corrections for CC rectangular pixels.
--- @param centre_x			The x coordinate of the circle's centre
--- @param centre_y			The y coordinate of the circle's centre
+-- @param centre_x			The x coordinate of the circle's centre, 0-based
+-- @param centre_y			The y coordinate of the circle's centre, 0-based
 -- @param radius			The radius of the circle
 -- @param background_colour	(Optional) The background colour to fill the circle outline with, defaults to DEFAULT_BACKGROUND
 -- @param foreground_colour	(Optional) The foreground colour to fill the circle outline with, defaults to DEFAULT_FOREGROUND
@@ -906,9 +939,9 @@ function buffer_methods:draw_circle_raw( centre_x, centre_y, radius, background_
 	local w = self.width
 
 	local new_pixel = {
-		background_colour or DEFAULT_BACKGROUND;
-		foreground_colour or DEFAULT_FOREGROUND;
-		character         or DEFAULT_CHARACTER;
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
 	}
 
 	local x = radius
@@ -940,8 +973,8 @@ function buffer_methods:draw_circle_raw( centre_x, centre_y, radius, background_
 end
 
 --- Draw a circle outline using the centre point and radius, with corrections for CC rectangular pixels.
--- @param centre_x			The x coordinate of the circle's centre
--- @param centre_y			The y coordinate of the circle's centre
+-- @param centre_x			The x coordinate of the circle's centre, 0-based
+-- @param centre_y			The y coordinate of the circle's centre, 0-based
 -- @param radius			The radius of the circle
 -- @param background_colour	(Optional) The background colour to fill the circle outline with, defaults to DEFAULT_BACKGROUND
 -- @param foreground_colour	(Optional) The foreground colour to fill the circle outline with, defaults to DEFAULT_FOREGROUND
@@ -952,9 +985,9 @@ function buffer_methods:draw_circle( centre_x, centre_y, radius, background_colo
 	local w = self.width
 
 	local new_pixel = {
-		background_colour or DEFAULT_BACKGROUND;
-		foreground_colour or DEFAULT_FOREGROUND;
-		character         or DEFAULT_CHARACTER;
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
 	}
 
 	local x = radius
@@ -985,6 +1018,173 @@ function buffer_methods:draw_circle( centre_x, centre_y, radius, background_colo
 	return self
 end
 
+--- Write text to the buffer.
+-- @param x					The x coordinate to start writing at, 0-based
+-- @param y					The y coordinate to start writing at, 0-based
+-- @param text				The text to write
+-- @param background_colour	(Optional) The background colour to use, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to use, defaults to DEFAULT_FOREGROUND
+-- @return self
+function buffer_methods:write( x, y, text, background_colour, foreground_colour )
+	background_colour = background_colour or DEFAULT_BACKGROUND
+	foreground_colour = foreground_colour or DEFAULT_FOREGROUND
+
+	local line_offset = y * self.width + x - 1
+	local sub = string.sub
+	local last_pixel, last_char
+
+	-- Go through the string, writing the new pixels
+	for i = 1, #text do
+		local char = sub( text, i, i )
+
+		if char ~= last_char then
+			last_pixel = {
+				background_colour;
+				foreground_colour;
+				char;
+			}
+
+			last_char = char
+		end
+
+		-- A -1 for i is included in line_offset
+		self[ line_offset + i ] = last_pixel
+	end
+
+	return self
+end
+
+--- Fix errors in the buffer, such as missing pixels or unknown colours.
+--	Fixes the following:
+--	* Missing pixels
+--	* Unknown colours
+--	* Strings longer than one character for pixel[3]
+--	* Missing or modified methods
+-- @param start_x			(Optional) The x coordinate to start repairing at, 0-based, defaults to 0
+-- @param start_y			(Optional) The y coordinate to start repairing at, 0-based, defaults to 0
+-- @param end_x				(Optional) The x coordinate to end repairing at, 0-based, defaults to self.width - 1
+-- @param end_y				(Optional) The y coordinate to end repairing at, 0-based, defaults to self.height - 1
+-- @param background_colour	(Optional) The background colour to replace a broken pixel with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to replace a broken pixel with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to replace a broken pixel with, defaults to DEFAULT_CHARACTER
+-- @return self, number of errors found
+function buffer_methods:repair( start_x, start_y, end_x, end_y, background_colour, foreground_colour, character )
+	start_x = start_x or 0
+	start_y = start_y or 0
+
+	end_x = end_x or ( self.width and self.width - 1 or error( "self.width is not present, buffer is unrepairable", 2 ) )
+	end_y = end_y or ( self.height and self.height - 1 or error( "self.height is not present, buffer is unrepairable", 2 ) )
+
+	background_colour = background_colour or DEFAULT_BACKGROUND
+	foreground_colour = foreground_colour or DEFAULT_FOREGROUND
+	character         = character         or DEFAULT_CHARACTER
+
+	local w = self.width
+	local n_errors = 0
+
+	local new_pixel = {
+		background_colour;
+		foreground_colour;
+		character;
+	}
+
+	-- Cache pixels that were already corrected
+	local corrected_pixels = {}
+
+	-- Go through all pixels in the to-be-repaired area
+	for y = start_y, end_y do
+		local line_offset = y * w
+
+		for x = start_x, end_x do
+			local pixel = self[ line_offset + x ]
+
+			if type( pixel ) ~= "table" then
+				-- The pixel is not here at all, set it to a blank pixel
+				n_errors = n_errors + 1
+				self[ line_offset + x ] = new_pixel
+
+			elseif not corrected_pixels[ pixel ] then
+				-- The pixel is here, check all data
+				if type( pixel[ 1 ] ) ~= "number" or not colour_lookup[ pixel[ 1 ] ] then
+					n_errors = n_errors + 1
+					pixel[ 1 ] = background_colour
+				end
+
+				if type( pixel[ 2 ] ) ~= "number" or not colour_lookup[ pixel[ 2 ] ] then
+					n_errors = n_errors + 1
+					pixel[ 2 ] = foreground_colour
+				end
+
+				if type( pixel[ 3 ] ) ~= "string" or #pixel[ 3 ] ~= 1 then
+					n_errors = n_errors + 1
+					pixel[ 3 ] = character
+				end
+
+				corrected_pixels[ pixel ] = true
+			end
+		end
+	end
+
+	-- This will hopefully force the GC to free the memory ASAP
+	corrected_pixels = nil
+
+	-- Check that all methods of the buffer are present and were not
+	-- modified, and reset those that aren't/were
+	for name, fn in pairs( buffer_methods ) do
+		if self[ name ] ~= fn then
+			n_errors = n_errors + 1
+			self[ name ] = fn
+		end
+	end
+
+	return self, n_errors
+end
+
+--- Iterate over the buffer.
+-- @param start_x	(Optional) The x coordinate to start iterating from, 0-based, defaults to 0
+-- @param start_y	(Optional) The y coordinate to start iterating from, 0-based, defaults to 0
+-- @param end_x		(Optional) The x coordinate to end iterating at, 0-based, defaults to self.width - 1
+-- @param end_y		(Optional) The y coordinate to end iterating at, 0-based, defaults to self.height - 1
+-- @return fn An iterator function which, when called, returns the next pixel, its coordinates and its index
+function buffer_methods:iter( start_x, start_y, end_x, end_y )
+	local w = self.width
+
+	local x = start_x - 1 or -1
+	local y = start_y or 0
+
+	end_x   = end_x   or self.width - 1
+	end_y   = end_y   or self.height - 1
+
+	local line_offset = y * w
+
+	return function()
+		x = x + 1
+
+		if x >= end_x then
+			y = y + 1
+
+			if y >= end_y then
+				return nil
+			end
+
+			line_offset = y * w
+			x = 0
+		end
+
+		local index = line_offset + x
+
+		return self[ index ], x, y, index
+	end
+end
+
+-- Aliases
+buffer_methods.draw_rect = buffer_methods.draw_rectangle
+buffer_methods.draw_rect_using_points = buffer_methods.draw_rectangle_using_points
+buffer_methods.draw_filled_rect = buffer_methods.draw_filled_rectangle
+buffer_methods.draw_filled_rect_using_points = buffer_methods.draw_filled_rectangle_using_points
+
+buffer_methods.iterate = buffer_methods.iter
+
 --- Create a new buffer.
 -- @param x					(Optional) The x coordinate of the buffer in parent, 0-based, defaults to 0
 -- @param y					(Optional) The y coordinate of the buffer in parent, 0-based, defaults to 0
@@ -1003,9 +1203,9 @@ function buffer.new( x, y, width, height, parent, background_colour, foreground_
 	height = height or 0
 
 	local new_pixel = {
-		background_colour or DEFAULT_BACKGROUND;
-		foreground_colour or DEFAULT_FOREGROUND;
-		character         or DEFAULT_CHARACTER;
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
 	}
 
 	if not no_prefill then
@@ -1034,7 +1234,9 @@ function buffer.new( x, y, width, height, parent, background_colour, foreground_
 	return n
 end
 
+-- Imports
 buffer.clone = buffer_methods.clone
+buffer.repair = buffer_methods.repair
 
 --- Syntactic sugar for both :render() and :render_to_window().
 --	Will attempt to decide which of the 2 methods to use, based
@@ -1050,5 +1252,8 @@ function buffer_metatable:__call( target, ... )
 		return self:render_to_window( target, ... )
 	end
 end
+
+-- Export the complete method table
+buffer.methods = buffer_methods
 
 return buffer
