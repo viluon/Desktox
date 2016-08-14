@@ -1,5 +1,5 @@
 
-local buffer = dofile( "buffer.lua" )
+local buffer = require "desktox-buffer"
 
 local w, h = term.getSize()
 

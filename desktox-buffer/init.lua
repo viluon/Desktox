@@ -1,8 +1,13 @@
 
--- Desktox, graphics stuff by @viluon
---  This Source Code Form is subject to the terms of the Mozilla Public
---  License, v. 2.0. If a copy of the MPL was not distributed with this
---  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+-- Desktox
+--  A set of graphics libraries for ComputerCraft by @viluon <viluon@espiv.net>
+
+--   desktox-buffer
+--    The Desktox buffer library
+
+--    This Source Code Form is subject to the terms of the Mozilla Public
+--    License, v. 2.0. If a copy of the MPL was not distributed with this
+--    file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 -- In case you'd forget, pixels are stored as { background_colour, text_colour, character }
 
@@ -102,7 +107,7 @@ function buffer_methods:resize( width, height, background_colour, foreground_col
 
 	local self_width = self.width
 	local self_height = self.height
-	local n_self = #self
+	local n_self = self.length
 
 	colour = colour or DEFAULT_BACKGROUND
 	width = width or self_width
@@ -151,6 +156,7 @@ function buffer_methods:resize( width, height, background_colour, foreground_col
 
 	self.width = width
 	self.height = height
+	self.length = width * height - 1
 
 	return self
 end
@@ -632,7 +638,7 @@ end
 function buffer_methods:scroll( lines, background_colour, foreground_colour, character )
 	lines = tonumber( lines ) or error( "Expected number for 'lines'", 2 )
 
-	local n_self = #self
+	local n_self = self.length
 	local width, height = self.width, self.height
 
 	local new_pixel = { 
@@ -691,7 +697,7 @@ end
 -- @param character			(Optional) The character to clear with, defaults to DEFAULT_CHARACTER
 -- @return self
 function buffer_methods:clear( background_colour, foreground_colour, character )
-	local n_self = #self
+	local n_self = self.length
 
 	local clear_pixel = {
 		tonumber( background_colour ) or DEFAULT_BACKGROUND;
@@ -1060,6 +1066,8 @@ end
 --	* Unknown colours
 --	* Strings longer than one character for pixel[3]
 --	* Missing or modified methods
+--	* Missing length
+--	* Missing x/y position
 -- @param start_x			(Optional) The x coordinate to start repairing at, 0-based, defaults to 0
 -- @param start_y			(Optional) The y coordinate to start repairing at, 0-based, defaults to 0
 -- @param end_x				(Optional) The x coordinate to end repairing at, 0-based, defaults to self.width - 1
@@ -1135,6 +1143,21 @@ function buffer_methods:repair( start_x, start_y, end_x, end_y, background_colou
 			n_errors = n_errors + 1
 			self[ name ] = fn
 		end
+	end
+
+	if not self.length then
+		self.length = self.width * self.height - 1
+		n_errors = n_errors + 1
+	end
+
+	if not self.x then
+		self.x = 0
+		n_errors = n_errors + 1
+	end
+
+	if not self.y then
+		self.y = 0
+		n_errors = n_errors + 1
 	end
 
 	return self, n_errors
@@ -1226,6 +1249,7 @@ function buffer.new( x, y, width, height, parent, background_colour, foreground_
 	n.y = y or 0
 	n.width = width
 	n.height = height
+	n.length = width * height - 1
 	n.parent = parent
 
 	-- Metadata
