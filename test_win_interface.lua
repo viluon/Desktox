@@ -6,10 +6,9 @@ local w, h = term.getSize()
 local terminal = term.current()
 
 local main_buf = buffer.new( 0, 0, w, h )
-local edit_buf = buffer.new( 0, 0, math.floor( w / 2 ), math.floor( h / 2 ), main_buf )
+local edit_buf = buffer.new( 2, 2, math.floor( w / 2 ), math.floor( h / 2 ), main_buf )
 local overlay_buf = buffer.new( 0, 0, 12, 8, main_buf ):clear( -1, colours.green, "\0" )
 
-local main_win = main_buf:get_window_interface( terminal )
 local edit_win = edit_buf:get_window_interface( terminal )
 edit_win.setBackgroundColour( colours.black )
 edit_win.clear()
@@ -56,8 +55,7 @@ while true do
 
 	main_buf:clear()
 
-	main_win.setCursorPos( 20, 14 )
-	main_win.write( "Hello world!" )
+	main_buf:write( 19, 13, "Hello world!", nil, colours.blue )
 
 	edit_buf:render()
 	overlay_buf:render()
