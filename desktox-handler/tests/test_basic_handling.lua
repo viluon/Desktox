@@ -9,13 +9,13 @@ local main_buffer   = buffer .new( 0, 0, w, h )
 local event_handler = handler.new( 0, 0, w, h )
 local rect_handler  = handler.new( 4, 2, 6, 4 )
 
+event_handler:adopt( rect_handler )
+
 local colour = colours.green
 
 function rect_handler.callbacks:mouse_click()
 	colour = 2 ^ math.random( 0, 15 )
 end
-
-event_handler:adopt( rect_handler )
 
 while true do
 	event_handler:handle_raw( os.pullEvent() )
