@@ -9,7 +9,7 @@
 --    License, v. 2.0. If a copy of the MPL was not distributed with this
 --    file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
--- In case you'd forget, pixels are stored as { background_colour, text_colour, character }
+-- In case you'd forget, pixels are stored as { background_colour, foreground_colour, character }
 
 local buffer = {}
 
@@ -26,6 +26,7 @@ local DEFAULT_FOREGROUND = colours.black
 local DEFAULT_CHARACTER = " "
 
 -- Utilities
+local setmetatable = setmetatable
 local type = type
 local pairs = pairs
 local ipairs = ipairs
@@ -697,8 +698,6 @@ end
 -- @param character			(Optional) The character to clear with, defaults to DEFAULT_CHARACTER
 -- @return self
 function buffer_methods:clear( background_colour, foreground_colour, character )
-	local n_self = self.length
-
 	local clear_pixel = {
 		tonumber( background_colour ) or DEFAULT_BACKGROUND;
 		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
@@ -706,7 +705,7 @@ function buffer_methods:clear( background_colour, foreground_colour, character )
 	}
 
 	-- Go through all pixels and set them to the clear pixel
-	for i = 0, n_self do
+	for i = 0, self.length do
 		self[ i ] = clear_pixel
 	end
 
@@ -825,7 +824,7 @@ end
 -- @param foreground_colour	(Optional) The foreground colour to fill the rectangle (including borders) with, defaults to DEFAULT_FOREGROUND
 -- @param character			(Optional) The character to fill the rectangle (including borders) with, defaults to DEFAULT_CHARACTER
 -- @return self
-function buffer_methods:draw_filled_rectangle_using_points( start_x, start_y, end_x, end_y, background_colour, foreground_colour, character )
+function buffer_methods:draw_filled_rectangle_from_points( start_x, start_y, end_x, end_y, background_colour, foreground_colour, character )
 	local w = self.width
 
 	-- Starting values must be smaller than ending ones
@@ -887,7 +886,7 @@ end
 -- @param foreground_colour	(Optional) The foreground colour to fill the rectangle border with, defaults to DEFAULT_FOREGROUND
 -- @param character			(Optional) The character to fill the rectangle border with, defaults to DEFAULT_CHARACTER
 -- @return self
-function buffer_methods:draw_rectangle_using_points( start_x, start_y, end_x, end_y, border_width,
+function buffer_methods:draw_rectangle_from_points( start_x, start_y, end_x, end_y, border_width,
                                                      background_colour, foreground_colour, character )
 	local w = self.width
 	border_width = border_width or 1
@@ -927,10 +926,10 @@ end
 -- @param background_colour	(Optional) The background colour to fill the rectangle border with, defaults to DEFAULT_BACKGROUND
 -- @param foreground_colour	(Optional) The foreground colour to fill the rectangle border with, defaults to DEFAULT_FOREGROUND
 -- @param character			(Optional) The character to fill the rectangle border with, defaults to DEFAULT_CHARACTER
--- @return Tail call of self:draw_rectangle_using_points(), resulting in self
+-- @return Tail call of self:draw_rectangle_from_points(), resulting in self
 function buffer_methods:draw_rectangle( x, y, width, height, border_width, background_colour, foreground_colour, character )
 	return self
-	:draw_rectangle_using_points( x, y, x + width - 1, y + height - 1, border_width, background_colour, foreground_colour, character )
+	:draw_rectangle_from_points( x, y, x + width - 1, y + height - 1, border_width, background_colour, foreground_colour, character )
 end
 
 --- Draw a circle outline using the centre point and radius, without corrections for CC rectangular pixels.
@@ -987,7 +986,6 @@ end
 -- @param character			(Optional) The character to fill the circle outline with, defaults to DEFAULT_CHARACTER
 -- @return self
 function buffer_methods:draw_circle( centre_x, centre_y, radius, background_colour, foreground_colour, character )
-	--TODO: Add corrections!
 	local w = self.width
 
 	local new_pixel = {
@@ -1003,14 +1001,14 @@ function buffer_methods:draw_circle( centre_x, centre_y, radius, background_colo
 	-- Generate points for the first octant, going counterclockwise
 	-- and mirroring them to other octants
 	while x >= y do
-		self[ ( centre_y + y ) * w + centre_x + x ] = new_pixel
-		self[ ( centre_y + x ) * w + centre_x + y ] = new_pixel
-		self[ ( centre_y + x ) * w + centre_x - y ] = new_pixel
-		self[ ( centre_y + y ) * w + centre_x - x ] = new_pixel
-		self[ ( centre_y - y ) * w + centre_x - x ] = new_pixel
-		self[ ( centre_y - x ) * w + centre_x - y ] = new_pixel
-		self[ ( centre_y - x ) * w + centre_x + y ] = new_pixel
-		self[ ( centre_y - y ) * w + centre_x + x ] = new_pixel
+		self[ ( centre_y + round( ( 2 / 3 ) * y ) ) * w + centre_x + x ] = new_pixel
+		self[ ( centre_y + round( ( 2 / 3 ) * x ) ) * w + centre_x + y ] = new_pixel
+		self[ ( centre_y + round( ( 2 / 3 ) * x ) ) * w + centre_x - y ] = new_pixel
+		self[ ( centre_y + round( ( 2 / 3 ) * y ) ) * w + centre_x - x ] = new_pixel
+		self[ ( centre_y - round( ( 2 / 3 ) * y ) ) * w + centre_x - x ] = new_pixel
+		self[ ( centre_y - round( ( 2 / 3 ) * x ) ) * w + centre_x - y ] = new_pixel
+		self[ ( centre_y - round( ( 2 / 3 ) * x ) ) * w + centre_x + y ] = new_pixel
+		self[ ( centre_y - round( ( 2 / 3 ) * y ) ) * w + centre_x + x ] = new_pixel
 
 		y = y + 1
 		err = err + 1 + 2 * y
@@ -1201,10 +1199,12 @@ function buffer_methods:iter( start_x, start_y, end_x, end_y )
 end
 
 -- Aliases
+buffer_methods.render_to_term = buffer_methods.render_to_window
+
 buffer_methods.draw_rect = buffer_methods.draw_rectangle
-buffer_methods.draw_rect_using_points = buffer_methods.draw_rectangle_using_points
+buffer_methods.draw_rect_from_points = buffer_methods.draw_rectangle_from_points
 buffer_methods.draw_filled_rect = buffer_methods.draw_filled_rectangle
-buffer_methods.draw_filled_rect_using_points = buffer_methods.draw_filled_rectangle_using_points
+buffer_methods.draw_filled_rect_from_points = buffer_methods.draw_filled_rectangle_from_points
 
 buffer_methods.iterate = buffer_methods.iter
 
