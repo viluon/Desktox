@@ -14,8 +14,9 @@ local handler_methods = {}
 local handler_metatable = {}
 local handler_callbacks_metatable = {}
 
--- The 'owner' field of event_handler.callbacks,
--- has to be inaccesible from the outside
+-- The 'owner' field of event_handler.callbacks
+-- mustn't clash with an event name, so we
+-- use a local table as the key
 local owner = {}
 
 -- Utilities
@@ -27,6 +28,7 @@ local ipairs = ipairs
 local tostring = tostring
 local tonumber = tonumber
 local error = error
+local rawset = rawset
 
 local insert = table.insert
 local remove = table.remove
@@ -69,17 +71,20 @@ local location_events = {
 
 --- Handle an event.
 -- @param event_name	The name of the event (such as 'mouse_click')
--- @param event_args	(Optional) An array of arguments for the event
+-- @param ...			(Optional) Arguments for the event
 -- @return self
-function handler_methods:handle( event_name, event_args )
+function handler_methods:handle( event_name, ... )
 	if type( event_name ) ~= "string" then
 		error( "Expected string as 'event_name'", 2 )
 	end
 
+	local event_args = { ... }
+
 	local is_global = global_events[ event_name ]
 	local loc_info = location_events[ event_name ]
 
-	local selected = self.selected
+	local x1 = self.x1
+	local y1 = self.y1
 
 	local x_pos, y_pos
 
@@ -87,12 +92,15 @@ function handler_methods:handle( event_name, event_args )
 		local x, y = event_args[ loc_info.x ], event_args[ loc_info.y ]
 
 		if x and y then
+			x_pos = x - x1
+			y_pos = y - y1
+
+			event_args[ loc_info.x ] = x_pos
+			event_args[ loc_info.y ] = y_pos
+
 			if loc_info.one_based then
-				x_pos = x - self.x1 - 1
-				y_pos = y - self.y1 - 1
-			else
-				x_pos = x - self.x1
-				y_pos = y - self.y1
+				x_pos = x_pos - 1
+				y_pos = y_pos - 1
 			end
 		end
 	end
@@ -103,22 +111,28 @@ function handler_methods:handle( event_name, event_args )
 	--TODO: pcall?
 	local fn = self.callbacks[ event_name ]
 	if fn then
-		fn( event_args )
+		fn( unpack( event_args ) )
 	end
 
 	if not self.family_callbacks[ event_name ] then
 		return
 	end
 
+	local x2 = self.x2
+	local y2 = self.y2
+	local selected = self.selected
+
 	if is_global or x_pos then
 		-- Check all children
 		for i, child in ipairs( self.children ) do
+			local last_selected = selected
+
 			if  is_global
 			    or ( x_pos
 			         and x_pos >= child.x1 and x_pos <= child.x2
 			         and y_pos >= child.y1 and y_pos <= child.y2 )
 			then
-				child:handle( event_name, event_args )
+				child:handle( event_name, unpack( event_args ) )
 
 				if not is_global then
 					self.selected = child
@@ -127,22 +141,13 @@ function handler_methods:handle( event_name, event_args )
 				end
 			end
 			
-			if not is_global and selected ~= child then
+			if not is_global and last_selected == child and selected ~= child then
 				child:handle( "on_deselect", event_name )
 			end
 		end
 	end
 
 	return self
-end
-
---- Handle a raw CraftOS event.
--- @param ...	The raw CraftOS event
--- @return Tail call of self:handle(), resulting in self
-function handler_methods:handle_raw( ... )
-	local event_args = { ... }
-
-	return self:handle( remove( event_args, 1 ), event_args )
 end
 
 --- Add a new child.
@@ -158,6 +163,11 @@ function handler_methods:adopt( child )
 
 	-- Add the callbacks of the new child to the family_callbacks table, for faster react time
 	for event_name, fn in pairs( child.callbacks ) do
+		family_callbacks[ event_name ] = true
+	end
+
+	-- Also add the child's children's callbacks
+	for event_name, _ in pairs( child.family_callbacks ) do
 		family_callbacks[ event_name ] = true
 	end
 
@@ -178,15 +188,34 @@ function handler_methods:register_callback( event_name, fn )
 	end
 
 	local previous_value = self.callbacks[ event_name ]
-	self.callbacks[ event_name ] = fn
+	rawset( self.callbacks, event_name, fn )
 
 	local parent = self.parent
 
-	if parent then
+	while parent do
 		parent.family_callbacks[ event_name ] = true
+		parent = parent.parent
 	end
 
 	return self, previous_value
+end
+
+--- Stop listening for an event.
+--	Note: This method does not update
+--	parents' family_callbacks table, which
+--	makes the hierarchy less efficient.
+-- @param event_name	description
+-- @return self, callback function
+function handler_methods:remove_callback( event_name )
+	local fn = self.callbacks[ event_name ]
+
+	if not fn then
+		return self
+	end
+
+	rawset( self.callbacks, event_name, nil )
+
+	return self, fn
 end
 
 -- Aliases
@@ -203,7 +232,7 @@ function handler.new( x, y, width, height, callbacks )
 	local n = setmetatable( {}, handler_metatable )
 
 	n.family_callbacks = {}
-	n.callbacks = { owner = n }
+	n.callbacks = { [ owner ] = n }
 
 	if type( callbacks ) == "table" then
 		-- Import the callbacks
@@ -227,6 +256,8 @@ function handler.new( x, y, width, height, callbacks )
 	n.children = {}
 	n.queue = {}
 
+	n.callbacks = setmetatable( n.callbacks, handler_callbacks_metatable )
+
 	-- Metadata
 	n.__type = "handler"
 
@@ -242,13 +273,11 @@ function handler_metatable:__call( ... )
 end
 
 --- An alias for event_handler:register_callback().
--- @param callbacks	description
--- @param event_name	description
--- @param fn	description
+-- @param ...	The arguments passed to :register_callback()
 -- @return Tail call of event_handler:register_callback()
 -- @see handler_methods:register_callback
-function handler_callbacks_metatable:__newindex( callbacks, event_name, fn )
-	return callbacks[ owner ]:register_callback( event_name, fn )
+function handler_callbacks_metatable:__newindex( ... )
+	return self[ owner ]:register_callback( ... )
 end
 
 return handler
