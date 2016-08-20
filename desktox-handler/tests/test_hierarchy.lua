@@ -7,6 +7,7 @@ local w, h = terminal.getSize()
 
 local main_buffer  = buffer .new( 0, 0, w, h )
 local main_handler = handler.new( 0, 0, w, h )
+main_handler.name  = "main_handler"
 
 function main_handler.callbacks:char( ... )
 	terminal.setCursorPos( 1, 1 )
@@ -21,14 +22,20 @@ function main_handler.callbacks:terminate()
 end
 
 local container_handler = handler.new( 1, 1, 20, 12 )
+container_handler.name  = "container_handler"
+
 local container_buffer  = buffer .new( 1, 1, 20, 12, main_buffer )
 	:draw_rect( 0, 0, 20, 12, 1, colours.blue )
 
 local button_handler = handler.new( 1, 1, 8, 3 )
+button_handler.name  = "button_handler"
+
 local button_buffer  = buffer .new( 1, 1, 8, 3, container_buffer )
 	:clear( colours.green )
 
 local label_handler = handler.new( 5, 6, 12, 1 )
+label_handler.name  = "label_handler"
+
 local label_buffer  = buffer .new( 5, 6, 12, 1, container_buffer )
 	:write( 0, 0, "Hello world!", colours.lightBlue, colours.black )
 
@@ -62,9 +69,11 @@ function container_handler.callbacks:on_deselect( event )
 end
 
 while true do
-	main_handler:handle( coroutine.yield() )
+	local event = main_handler:handle_and_return( coroutine.yield() )
 
-	main_buffer:clear()
+	main_buffer
+		:clear()
+		:write( 0, 0, tostring( event ) )
 
 	-- Do the drawing
 	label_buffer    :render()
