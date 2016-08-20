@@ -58,50 +58,146 @@ local global_events = {
 local x2y3 = {
 	x = 2;
 	y = 3;
+	-- Whether the event can select an element
+	selects = true;
+	-- Whether the coordinates passed are 1-based (otherwise 0-based)
+	one_based = true;
+}
+
+local x2y3_no_select = {
+	x = 2;
+	y = 3;
+	selects = false;
 	one_based = true;
 }
 
 local location_events = {
 	[ "mouse_click" ]   = x2y3;
 	[ "mouse_up" ]      = x2y3;
-	[ "mouse_scroll" ]  = x2y3;
-	[ "mouse_drag" ]    = x2y3;
 	[ "monitor_touch" ] = x2y3;
+
+	-- Scrolling should not select and deselect elements
+	[ "mouse_scroll" ]  = x2y3_no_select;
+	-- Only clicks should actually count, drags should really be handled internally
+	[ "mouse_drag" ]    = x2y3_no_select;
 }
 
+--- Append text to the log file.
+-- @param txt	The text to write
+-- @return nil
+local function log( txt )
+	local f = io.open( "/log.txt", "a" )
+	local time = tostring( os.clock() )
+
+	f:write( "[" .. time .. string.rep( " ", math.max( 0, 10 - #time ) ) .. "]\t" .. txt .. "\n" )
+
+	f:close()
+end
+
 --- Handle an event.
--- @param event_name	The name of the event (such as 'mouse_click')
--- @param ...			(Optional) Arguments for the event
--- @return self
-function handler_methods:handle( event_name, ... )
+-- @param event_name	The name of the event to handle
+-- @param local_only	If true, the event won't be propagated to child elements
+-- @param ...			The event's arguments
+-- @return A tail call chain of handle_internal resulting in self
+-- @see handler_methods:handle_internal
+function handler_methods:handle_and_return( event_name, ... )
 	if type( event_name ) ~= "string" then
 		error( "Expected string as 'event_name'", 2 )
 	end
+
+	--log( ":handle_and_return() called with '" .. event_name .. "'" )
 
 	local event_args = { ... }
 
 	local is_global = global_events[ event_name ]
 	local loc_info = location_events[ event_name ]
 
+	if loc_info then
+		-- Offset the coordinates if they come from a 1-based system
+		local offset = loc_info.one_based and 1 or 0
+
+		-- loc_info is now a coord table, as defined in the coords param description of :handle_internal()
+		loc_info = {
+			x = event_args[ loc_info.x ] - offset;
+			y = event_args[ loc_info.y ] - offset;
+			selects = loc_info.selects;
+		}
+	end
+
+	self:handle_internal( event_name, event_args, is_global, loc_info and loc_info.selects, loc_info, {}, {}, 0, self )
+
+	return event_name, event_args
+end
+
+--- Identical to handler_methods:handle_and_return(), except that the event won't be propagated to children.
+-- @param event_name	The name of the event
+-- @param ...			The arguments to the event
+-- @return The name of the event, its arguments in a table
+-- @see handler_methods:handle_internal
+function handler_methods:handle_local_and_return( event_name, ... )
+	if type( event_name ) ~= "string" then
+		error( "Expected string as 'event_name'", 2 )
+	end
+
+	--log( ":handle_and_return() called with '" .. event_name .. "'" )
+
+	local event_args = { ... }
+
+	local is_global = global_events[ event_name ]
+	local loc_info = location_events[ event_name ]
+
+	if loc_info then
+		-- Offset the coordinates if they come from a 1-based system
+		local offset = loc_info.one_based and 1 or 0
+
+		-- loc_info is now a coord table, as defined in the coords param description of :handle_internal()
+		loc_info = {
+			x = event_args[ loc_info.x ] - offset;
+			y = event_args[ loc_info.y ] - offset;
+			selects = loc_info.selects;
+		}
+	end
+
+	self:handle_internal( event_name, event_args, is_global, loc_info and loc_info.selects, loc_info, {}, {}, 0, self, true )
+
+	return event_name, event_args
+end
+
+--- An internal helper method for non-recursive handling of events.
+-- @param event_name		The name of the event, such as 'mouse_click'
+-- @param event_args		An array of the event's arguments
+-- @param is_global			Whether the event is global
+-- @param selects			Whether the event can select an element
+-- @param loc_info			Location information for the current element, like a coord table (see the coords param)
+-- @param etw				An array of elements to wake (pass :handle_internal control to)
+-- @param coords			An array synced with etw containing tables with local coordinates for the etw element
+--							at the same index. #etw == #coords at all times, coord tables are structured like
+--							{ x = number; y = number; one_based = location_events[ event_name ].one_based }
+-- @param n_etw				Length of etw (and therefore also of coords), for performance speed ups
+-- @param obj_to_return		The object to return once all elements have finished handle jobs
+-- @param local_only		If true, the event won't be propagated to child elements
+-- @return Tail call of event_handler:handle_internal or obj_to_return
+function handler_methods:handle_internal( event_name, event_args, is_global, selects, loc_info, etw, coords, n_etw, obj_to_return, local_only )
+	--local name = tostring( self.name )
+	--log( "Starting :handle_internal() for " .. name )
+
+	-- Handle the event locally
 	local x1 = self.x1
 	local y1 = self.y1
 
 	local x_pos, y_pos
 
 	if loc_info then
-		local x, y = event_args[ loc_info.x ], event_args[ loc_info.y ]
+		local x, y = loc_info.x, loc_info.y
 
 		if x and y then
 			x_pos = x - x1
 			y_pos = y - y1
 
-			event_args[ loc_info.x ] = x_pos
-			event_args[ loc_info.y ] = y_pos
-
-			if loc_info.one_based then
-				x_pos = x_pos - 1
-				y_pos = y_pos - 1
-			end
+			coord_info = {
+				x = x_pos;
+				y = y_pos;
+			}
 		end
 	end
 
@@ -114,39 +210,79 @@ function handler_methods:handle( event_name, ... )
 		fn( unpack( event_args ) )
 	end
 
-	if not self.family_callbacks[ event_name ] then
-		return
-	end
+	if not local_only and self.family_callbacks[ event_name ] then
+		--log( "\t✓ Has callbacks" )
 
-	local x2 = self.x2
-	local y2 = self.y2
-	local selected = self.selected
+		local x2 = self.x2
+		local y2 = self.y2
+		local selected = self.selected
 
-	if is_global or x_pos then
-		-- Check all children
-		for i, child in ipairs( self.children ) do
+		if is_global or x_pos then
+			local not_global_and_selects = not is_global and selects
 			local last_selected = selected
+			local no_match = true
 
-			if  is_global
-			    or ( x_pos
-			         and x_pos >= child.x1 and x_pos <= child.x2
-			         and y_pos >= child.y1 and y_pos <= child.y2 )
-			then
-				child:handle( event_name, unpack( event_args ) )
+			-- Add our affected children to the elements to wake table
+			for i, child in ipairs( self.children ) do
+				--log( "\t\tChecking child " .. tostring( child.name ) )
+				--log( "\t\t\tx_pos = " .. tostring( x_pos ) .. "; y_pos = " .. tostring( y_pos ) .. ";" )
 
-				if not is_global then
-					self.selected = child
-					selected = child
-					child:handle( "on_select", event_name )
+				if  is_global
+				    or ( x_pos
+				         and x_pos >= child.x1 and x_pos <= child.x2
+				         and y_pos >= child.y1 and y_pos <= child.y2 )
+				then
+					no_match = false
+
+					n_etw = n_etw + 1
+					etw[ n_etw ] = child
+					coords[ n_etw ] = coord_info
+
+					--log( "\t\t✓ Added to etw" )
+
+					if not_global_and_selects then
+						self.selected = child
+						selected = child
+						child:handle_local_and_return( "on_select", event_name )
+					end
 				end
 			end
-			
-			if not is_global and last_selected == child and selected ~= child then
-				child:handle( "on_deselect", event_name )
+
+			if not_global_and_selects and last_selected and ( selected ~= last_selected or no_match ) then
+				last_selected:handle_local_and_return( "on_deselect", event_name )
 			end
 		end
 	end
 
+	if n_etw == 0 then
+		-- All elements have been handled
+		--log( "\tNo more elements to wake, returning" )
+		return obj_to_return
+
+	else
+		-- Handle the next element in the queue
+		--log( "\t✓ Done, passing control" )
+		return remove( etw, 1 )
+			:handle_internal(
+				event_name,
+				event_args,
+				is_global,
+				selects,
+				remove( coords, 1 ),
+				etw,
+				coords,
+				n_etw - 1,
+				obj_to_return,
+				local_only
+			)
+	end
+end
+
+--- Handle an event and return self for method chaining.
+-- @param ...	Arguments passed to self:handle_and_return()
+-- @return self
+function handler_methods:handle( ... )
+	self:handle_and_return( ... )
 	return self
 end
 
@@ -265,6 +401,7 @@ function handler.new( x, y, width, height, callbacks )
 end
 
 --- An alias for event_handler:handle().
+--	Should be avoided for best performance.
 -- @param ...	The arguments passed to :handle()
 -- @return Tail call of event_handler:handle()
 -- @see handler_methods:handle
@@ -273,6 +410,7 @@ function handler_metatable:__call( ... )
 end
 
 --- An alias for event_handler:register_callback().
+--	Should be avoided for best performance.
 -- @param ...	The arguments passed to :register_callback()
 -- @return Tail call of event_handler:register_callback()
 -- @see handler_methods:register_callback
