@@ -22,7 +22,7 @@ local owner = {}
 -- Utilities
 local setmetatable = setmetatable
 local type = type
-local unpack = unpack
+local unpack = table.unpack or unpack
 local pairs = pairs
 local ipairs = ipairs
 local tostring = tostring
@@ -92,6 +92,17 @@ local function log( txt )
 	f:write( "[" .. time .. string.rep( " ", math.max( 0, 10 - #time ) ) .. "]\t" .. txt .. "\n" )
 
 	f:close()
+end
+
+--- Resize the event handler.
+-- @param width		The desired new width
+-- @param height	The desired new height
+-- @return self
+function handler_methods:resize( width, height )
+	self.x2 = self.x1 + ( tonumber( width  or self.width  ) or error( "Expected number as 'width'",  2 ) ) - 1
+	self.y2 = self.y1 + ( tonumber( height or self.height ) or error( "Expected number as 'height'", 2 ) ) - 1
+
+	return self
 end
 
 --- Handle an event.
@@ -281,6 +292,7 @@ end
 --- Handle an event and return self for method chaining.
 -- @param ...	Arguments passed to self:handle_and_return()
 -- @return self
+-- @see handler_methods:handle_and_return
 function handler_methods:handle( ... )
 	self:handle_and_return( ... )
 	return self
@@ -357,15 +369,29 @@ end
 -- Aliases
 handler_methods.add_child = handler_methods.adopt
 
---- Create a new event handler.
--- @param x			The x coordinate of the handler area
--- @param y			The y coordinate of the handler area
--- @param width		The width of the handler area
--- @param height	The height of the handler area
--- @param callbacks	(Optional) A table of callbacks, structured as { [ event_name ] = fn }
+--- Create a new event handler using one point, width and height.
+-- @param x					(Optional) The x coordinate of the handler area, defaults to 0
+-- @param y					(Optional) The y coordinate of the handler area, defaults to 0
+-- @param width				(Optional) The width of the handler area, defaults to 0
+-- @param height			(Optional) The height of the handler area, defaults to 0
+-- @param callbacks			(Optional) A table of callbacks, structured as { [ event_name ] = fn }
+-- @param existing_table	(Optional) Use this table for the object instead of creating a new one
+-- @return A tail call of handler.new_from_points(), resulting in the new event handler
+-- @see handler.new_from_points
+function handler.new( x, y, width, height, callbacks, existing_table )	
+	return handler.new_from_points( x, y, x + width - 1, y + height - 1, callbacks, existing_table )
+end
+
+--- Create a new handler using two points.
+-- @param x1				(Optional) The x coordinate of the first point of the handler area, defaults to 0
+-- @param y1				(Optional) The y coordinate of the first point of the handler area, defaults to 0
+-- @param x2				(Optional) The x coordinate of the second point of the handler area, defaults to 0
+-- @param y2				(Optional) The y coordinate of the second point of the handler area, defaults to 0
+-- @param callbacks			(Optional) A table of callbacks, structured as { [ event_name ] = fn }
+-- @param existing_table	(Optional) Use this table for the object instead of creating a new one
 -- @return The new event handler
-function handler.new( x, y, width, height, callbacks )
-	local n = setmetatable( {}, handler_metatable )
+function handler.new_from_points( x1, y1, x2, y2, callbacks, existing_table )
+	local n = setmetatable( existing_table or {}, handler_metatable )
 
 	n.family_callbacks = {}
 	n.callbacks = { [ owner ] = n }
@@ -384,10 +410,13 @@ function handler.new( x, y, width, height, callbacks )
 		n[ name ] = method
 	end
 
-	n.x1 = x
-	n.y1 = y
-	n.x2 = x + width - 1
-	n.y2 = y + height - 1
+	n.x1 = x1 or 0
+	n.y1 = y1 or 0
+	n.x2 = x2 or 0
+	n.y2 = y2 or 0
+
+	n.width  = x2 - x1 + 1
+	n.height = y2 - y1 + 1
 
 	n.children = {}
 	n.queue = {}
@@ -395,7 +424,7 @@ function handler.new( x, y, width, height, callbacks )
 	n.callbacks = setmetatable( n.callbacks, handler_callbacks_metatable )
 
 	-- Metadata
-	n.__type = "handler"
+	n.__type = "desktox-handler"
 
 	return n
 end
@@ -417,5 +446,8 @@ end
 function handler_callbacks_metatable:__newindex( ... )
 	return self[ owner ]:register_callback( ... )
 end
+
+-- Export the complete method table
+handler.methods = handler_methods
 
 return handler
