@@ -71,29 +71,8 @@ local unable_to_set_optional_argument = "Unable to set optional argument "
 
 -- Utility functions
 
---- Get the maximum value out of a and b.
---	Unlike math.max, only supports 2 arguments,
---	but returns the second-in-value number as
---	the second value.
--- @param a	The first number to compare
--- @param b	The second number to compare
--- @return a and b, whichever is greater in value goes first.
-local function max( a, b )
-	if a > b then
-		return a, b
-	end
-
-	return b, a
-end
-
---- Rounds a number to a set amount of decimal places.
--- @param n			The number to round
--- @param places 	The number of decimal places to keep
--- @return The result
-local function round( n, places )
-	local mult = 10 ^ ( places or 0 )
-	return floor( n * mult + 0.5 ) / mult
-end
+local max   = require( "desktox-utils" ).max
+local round = require( "desktox-utils" ).round
 
 --- Resize the buffer.
 -- @param width				(Optional) The desired new width, defaults to self.width
@@ -1218,9 +1197,10 @@ buffer_methods.iterate = buffer_methods.iter
 -- @param foreground_colour	(Optional) The foreground colour to prefill the buffer with, defaults to DEFAULT_FOREGROUND
 -- @param character			(Optional) The character to prefill the buffer with, defaults to DEFAULT_CHARACTER
 -- @param no_prefill		(Optional) Disable prefilling of the buffer, defaults to false
+-- @param existing_table	(Optional) Use this table for the object instead of creating a new one
 -- @return buffer			The new buffer
-function buffer.new( x, y, width, height, parent, background_colour, foreground_colour, character, no_prefill )
-	local n = setmetatable( {}, buffer_metatable )
+function buffer.new( x, y, width, height, parent, background_colour, foreground_colour, character, no_prefill, existing_table )
+	local n = setmetatable( existing_table or {}, buffer_metatable )
 
 	width = width or 0
 	height = height or 0
@@ -1253,7 +1233,7 @@ function buffer.new( x, y, width, height, parent, background_colour, foreground_
 	n.parent = parent
 
 	-- Metadata
-	n.__type = "buffer"
+	n.__type = "desktox-buffer"
 
 	return n
 end
@@ -1270,7 +1250,7 @@ buffer.repair = buffer_methods.repair
 -- @param ...		Any arguments passed to :render() or :render_to_window()
 -- @return Tail call of :render() or :render_to_window()
 function buffer_metatable:__call( target, ... )
-	if self.parent or ( type( target ) == "table" and target.__type == "buffer" ) then
+	if self.parent or ( type( target ) == "table" and target.__type == "desktox-buffer" ) then
 		return self:render( target, ... )
 	else
 		return self:render_to_window( target, ... )
@@ -1279,5 +1259,10 @@ end
 
 -- Export the complete method table
 buffer.methods = buffer_methods
+
+-- Export the default values
+buffer.DEFAULT_BACKGROUND = DEFAULT_BACKGROUND
+buffer.DEFAULT_FOREGROUND = DEFAULT_FOREGROUND
+buffer.DEFAULT_CHARACTER  = DEFAULT_CHARACTER
 
 return buffer
