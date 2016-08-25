@@ -97,7 +97,7 @@ _G.package.loaders = {
 
 _G.require = function(name)
 	if package.loaded[name] then
-		return package.loaded[name]
+		--return package.loaded[name]
 	end
 	
 	local _errors = {}
