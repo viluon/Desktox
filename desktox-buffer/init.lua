@@ -74,6 +74,8 @@ local unable_to_set_optional_argument = "Unable to set optional argument "
 local max   = require( "desktox-utils" ).max
 local round = require( "desktox-utils" ).round
 
+local log, close_log = require( "desktox-utils" ).open_log_file( "/log.txt" )
+
 --- Resize the buffer.
 -- @param width				(Optional) The desired new width, defaults to self.width
 -- @param height			(Optional) The desired new height, defaults to self.height
@@ -166,7 +168,7 @@ end
 -- @param data		(Optional) The data of the new clone, defaults to self
 -- @return buffer	The new buffer, a clone of self
 function buffer_methods:clone( data )
-	local clone = buffer.new( self.x, self.y, self.width, self.height, self.parent )
+	local clone = buffer.new_from_points( self.x1, self.y1, self.x2, self.y2, self.parent )
 
 	-- Clone the pixel data
 	if data and type( data ) == "table" then
@@ -192,8 +194,8 @@ end
 
 --- Render the buffer to another buffer.
 -- @param target	(Optional) The buffer to render to, defaults to self.parent
--- @param x			(Optional) The x coordinate in target to render self at, 0-based, defaults to self.x
--- @param y			(Optional) The y coordinate in target to render self at, 0-based, defaults to self.y
+-- @param x			(Optional) The x coordinate in target to render self at, 0-based, defaults to self.x1
+-- @param y			(Optional) The y coordinate in target to render self at, 0-based, defaults to self.y1
 -- @param start_x	(Optional) The x coordinate in self to start rendering from, 0-based, defaults to 0
 -- @param start_y	(Optional) The y coordinate in self to start rendering from, 0-based, defaults to 0
 -- @param end_x		(Optional) The x coordinate in self to stop rendering at, 0-based, defaults to self.width - 1
@@ -201,8 +203,8 @@ end
 -- @return self
 function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 	target = target or self.parent or error( unable_to_set_optional_argument .. "'target': self.parent is nil", 2 )
-	x      = x      or self.x      or error( unable_to_set_optional_argument .. "'x': self.x is nil", 2 )
-	y      = y      or self.y      or error( unable_to_set_optional_argument .. "'y': self.y is nil", 2 )
+	x      = x      or self.x1     or error( unable_to_set_optional_argument .. "'x': self.x1 is nil", 2 )
+	y      = y      or self.y1     or error( unable_to_set_optional_argument .. "'y': self.y1 is nil", 2 )
 
 	local self_width = self.width
 	local target_width = target.width
@@ -212,18 +214,28 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 	end_x = end_x or self_width - 1
 	end_y = end_y or self.height - 1
 
+	-- Will be explained further down
 	local false_parent = { parent = target }
 
 	-- Loop through all coordinates
 	for _y = start_y, end_y do
+		-- Cache the line position for both the target buffer and us
 		local target_offset = ( _y + y ) * target_width + x
 		local local_offset  = _y * self_width
 
 		for _x = start_x, end_x do
+			-- index is where should we store the resultant pixel in target
 			local index = target_offset + _x
+			-- pixel is the data from our buffer
 			local pixel = self[ local_offset + _x ]
 
+			-- Cache the contents for faster access
 			local pixel1, pixel2, pixel3 = pixel[ 1 ], pixel[ 2 ], pixel[ 3 ]
+
+			-- debug
+			if _y == 0 and _x == 0 then
+				log( pixel1, pixel2, pixel3 )
+			end
 
 			-- Set the pixel in target, resolving transparency along the way
 			if pixel1 < 0 or pixel2 < 0 or pixel3 == TRANSPARENT_CHARACTER then
@@ -236,68 +248,96 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 				local tracked_offset_x = x
 				local tracked_offset_y = y
 
-				-- Down into the rabbit hole we go. One parent level further with every iteration
-				while background_colour < 0 do
-					local_parent = local_parent.parent
+				-- Not only we have to get to the non-transparent colour
+				-- when the background_colour is transparent, we also have
+				-- to resolve the colour if the *foreground* uses it
 
-					if not local_parent then
-						-- We've reached the very bottom of the family stack, without luck
-						background_colour = DEFAULT_BACKGROUND
-						break
+				--TODO: background_colour < 0 or == TRANSPARENT_BACKGROUND ?
+				if background_colour < 0 or pixel2 == TRANSPARENT_BACKGROUND then
+					-- We have to let the loop run at least once, for the TRANSPARENT_BACKGROUND to resolve
+					local first_run = true
+
+					-- Down into the rabbit hole we go. One parent level further with every iteration.
+					while background_colour < 0 or first_run do
+						-- This wouldn't work the first time (when the loop starts), that's
+						-- why we defined local_parent to be the false_parent
+						local_parent = local_parent.parent
+
+						if not local_parent then
+							-- We've reached the very bottom of the family stack, without luck
+							background_colour = DEFAULT_BACKGROUND
+							break
+						end
+
+						-- All buffers have a position, we have to keep track of that
+						tracked_offset_x = tracked_offset_x + local_parent.x1
+						tracked_offset_y = tracked_offset_y + local_parent.y1
+
+						local actual_y = _y + tracked_offset_y
+						local actual_x = _x + tracked_offset_x
+						local p_width = local_parent.width
+						local p_height = local_parent.height
+
+						-- Check that we are within bounds
+						-- We could subtract a 1 in the local definition above, but if actual_x < 0 then the operation
+						-- doesn't even happen :P
+						if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
+							-- We can't get a pixel out of bounds of this parent, so we'll just roll with
+							-- the default colour.
+							--TODO: Would it be better if we'd look for any parent that *is* within bounds instead?
+							--      Probably not, the result isn't visible anyway since that part of self is outside
+							--      of the parent
+							background_colour = DEFAULT_BACKGROUND
+							break
+						end
+
+						background_colour = local_parent[ actual_y * p_width + actual_x ][ 1 ]
+						first_run = false
+
+						-- debug
+						if _y == 0 and _x == 0 then
+							log( "Set background_colour to " .. background_colour )
+						end
 					end
-
-					-- All buffers have a position, we have to keep track of that
-					tracked_offset_x = tracked_offset_x + local_parent.x
-					tracked_offset_y = tracked_offset_y + local_parent.y
-
-					local actual_y = _y + tracked_offset_y
-					local actual_x = _x + tracked_offset_x
-					local p_width = local_parent.width
-					local p_height = local_parent.height
-
-					-- Check that we are within bounds
-					if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
-						-- We can't get a pixel out of bounds of this parent, so we'll just roll with
-						-- the default colour.
-						--TODO: Would it be better if we'd look for any parent that *is* within bounds instead?
-						--      Probably not, the result isn't visible anyway since that part of self is outside
-						--		of the parent
-						background_colour = DEFAULT_BACKGROUND
-						break
-					end
-
-					background_colour = local_parent[ actual_y * p_width + actual_x ][ 1 ]
 				end
 
 				-- The same goes for foreground colour...
-				local_parent = false_parent
-				tracked_offset_x = x
-				tracked_offset_y = y
-				while foreground_colour < 0 do
-					local_parent = local_parent.parent
+				if foreground_colour < 0 or pixel1 == TRANSPARENT_FOREGROUND then
+					local_parent = false_parent
+					tracked_offset_x = x
+					tracked_offset_y = y
 
-					if not local_parent then
-						foreground_colour = DEFAULT_FOREGROUND
-						break
+					local first_run = true
+
+					while foreground_colour < 0 or first_run do
+						local_parent = local_parent.parent
+
+						if not local_parent then
+							foreground_colour = DEFAULT_FOREGROUND
+							break
+						end
+
+						tracked_offset_x = tracked_offset_x + local_parent.x1
+						tracked_offset_y = tracked_offset_y + local_parent.y1
+
+						local actual_y = _y + tracked_offset_y
+						local actual_x = _x + tracked_offset_x
+						local p_width = local_parent.width
+						local p_height = local_parent.height
+
+						if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
+							foreground_colour = DEFAULT_FOREGROUND
+							break
+						end
+
+						foreground_colour = local_parent[ actual_y * p_width + actual_x ][ 2 ]
+						first_run = false
 					end
-
-					tracked_offset_x = tracked_offset_x + local_parent.x
-					tracked_offset_y = tracked_offset_y + local_parent.y
-
-					local actual_y = _y + tracked_offset_y
-					local actual_x = _x + tracked_offset_x
-					local p_width = local_parent.width
-					local p_height = local_parent.height
-
-					if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
-						foreground_colour = DEFAULT_FOREGROUND
-						break
-					end
-
-					foreground_colour = local_parent[ actual_y * p_width + actual_x ][ 2 ]
 				end
 
 				-- ...And finally for the character.
+				-- Note that a colour cannot be transparent to a character, so
+				-- there's no extra branch here
 				local_parent = false_parent
 				tracked_offset_x = x
 				tracked_offset_y = y
@@ -309,8 +349,8 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 						break
 					end
 
-					tracked_offset_x = tracked_offset_x + local_parent.x
-					tracked_offset_y = tracked_offset_y + local_parent.y
+					tracked_offset_x = tracked_offset_x + local_parent.x1
+					tracked_offset_y = tracked_offset_y + local_parent.y1
 
 					local actual_y = _y + tracked_offset_y
 					local actual_x = _x + tracked_offset_x
@@ -360,12 +400,14 @@ end
 
 --- Render the buffer to a CraftOS window object.
 -- @param target	The window to render to
--- @param x			(Optional) The x coordinate in target to render self at, 1-based, defaults to self.x + 1
--- @param y			(Optional) The y coordinate in target to render self at, 1-based, defaults to self.y + 1
+-- @param x			(Optional) The x coordinate in target to render self at, 1-based, defaults to self.x1 + 1
+-- @param y			(Optional) The y coordinate in target to render self at, 1-based, defaults to self.y1 + 1
 -- @return self
 function buffer_methods:render_to_window( target, x, y )
-	x = x or self.x + 1
-	y = y and y - 1 or self.y
+	x = x or self.x1 + 1
+	y = y and y - 1 or self.y1
+
+	log( "Rendering to a window at " .. x .. ":" .. y )
 
 	local scp, blit = target.setCursorPos, target.blit
 
@@ -404,6 +446,11 @@ function buffer_methods:cook_lines( start_x, start_y, end_x, end_y )
 		-- Add the pixel data to the end of the line
 		for x = start_x, end_x do
 			local pixel = self[ line_offset + x ]
+
+			-- debug
+			if y == 0 and x == 0 then
+				log( "Cook job: got ", unpack( pixel ) )
+			end
 
 			line[ 1 ] = line[ 1 ] .. colour_lookup[ pixel[ 1 ] ]
 			line[ 2 ] = line[ 2 ] .. colour_lookup[ pixel[ 2 ] ]
@@ -1127,13 +1174,13 @@ function buffer_methods:repair( start_x, start_y, end_x, end_y, background_colou
 		n_errors = n_errors + 1
 	end
 
-	if not self.x then
-		self.x = 0
+	if not self.x1 then
+		self.x1 = 0
 		n_errors = n_errors + 1
 	end
 
-	if not self.y then
-		self.y = 0
+	if not self.y2 then
+		self.y2 = 0
 		n_errors = n_errors + 1
 	end
 
@@ -1187,7 +1234,7 @@ buffer_methods.draw_filled_rect_from_points = buffer_methods.draw_filled_rectang
 
 buffer_methods.iterate = buffer_methods.iter
 
---- Create a new buffer.
+--- Create a new buffer using one point, width and height.
 -- @param x					(Optional) The x coordinate of the buffer in parent, 0-based, defaults to 0
 -- @param y					(Optional) The y coordinate of the buffer in parent, 0-based, defaults to 0
 -- @param width				(Optional) The width of the buffer, defaults to 0
@@ -1198,12 +1245,39 @@ buffer_methods.iterate = buffer_methods.iter
 -- @param character			(Optional) The character to prefill the buffer with, defaults to DEFAULT_CHARACTER
 -- @param no_prefill		(Optional) Disable prefilling of the buffer, defaults to false
 -- @param existing_table	(Optional) Use this table for the object instead of creating a new one
--- @return buffer			The new buffer
+-- @return Tail call of buffer.new_from_points(), resulting in the new buffer
+-- @see buffer.new_from_points
 function buffer.new( x, y, width, height, parent, background_colour, foreground_colour, character, no_prefill, existing_table )
+	return buffer.new_from_points( x, y, x and ( x + width - 1 ) or 0, y and ( y + height - 1 ) or 0, parent,
+		background_colour, foreground_colour, character, no_prefill, existing_table  )
+end
+
+--- Create a new buffer using two points.
+-- @param x1				(Optional) The x coordinate of the first point of the buffer in parent, 0-based, defaults to 0
+-- @param y1				(Optional) The y coordinate of the first point of the buffer in parent, 0-based, defaults to 0
+-- @param x2				(Optional) The x coordinate of the second point of the buffer in parent, 0-based, defaults to 0
+-- @param y2				(Optional) The y coordinate of the second point of the buffer in parent, 0-based, defaults to 0
+-- @param parent			This buffer's render target
+-- @param background_colour	(Optional) The background colour to prefill the buffer with, defaults to DEFAULT_BACKGROUND
+-- @param foreground_colour	(Optional) The foreground colour to prefill the buffer with, defaults to DEFAULT_FOREGROUND
+-- @param character			(Optional) The character to prefill the buffer with, defaults to DEFAULT_CHARACTER
+-- @param no_prefill		(Optional) Disable prefilling of the buffer, defaults to false
+-- @param existing_table	(Optional) Use this table for the object instead of creating a new one
+-- @return buffer			The new buffer
+function buffer.new_from_points( x1, y1, x2, y2, parent, background_colour, foreground_colour, character, no_prefill, existing_table )
 	local n = setmetatable( existing_table or {}, buffer_metatable )
 
-	width = width or 0
-	height = height or 0
+	x1 = x1 or 0
+	y1 = y1 or 0
+	x2 = x2 or 0
+	y2 = y2 or 0
+
+	-- Ending values must be larger than starting ones
+	x2, x1 = max( x1, x2 )
+	y2, y1 = max( y1, y2 )
+
+	local width  = x2 - x1 + 1
+	local height = y2 - y1 + 1
 
 	local new_pixel = {
 		tonumber( background_colour ) or DEFAULT_BACKGROUND;
@@ -1213,8 +1287,8 @@ function buffer.new( x, y, width, height, parent, background_colour, foreground_
 
 	if not no_prefill then
 		-- Prefill the buffer with new_pixel
-		for y = 0, height - 1 do
-			for x = 0, width - 1 do
+		for y = 0, y2 do
+			for x = 0, x2 do
 				n[ y * width + x ] = new_pixel
 			end
 		end
@@ -1225,9 +1299,12 @@ function buffer.new( x, y, width, height, parent, background_colour, foreground_
 		n[ k ] = fn
 	end
 
-	n.x = x or 0
-	n.y = y or 0
-	n.width = width
+	n.x1 = x1
+	n.y1 = y1
+	n.x2 = x2
+	n.y2 = y2
+
+	n.width  = width
 	n.height = height
 	n.length = width * height - 1
 	n.parent = parent
@@ -1259,6 +1336,10 @@ end
 
 -- Export the complete method table
 buffer.methods = buffer_methods
+
+-- Export logging functions
+buffer.log = log
+buffer.close_log = close_log
 
 -- Export the default values
 buffer.DEFAULT_BACKGROUND = DEFAULT_BACKGROUND
