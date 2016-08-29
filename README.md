@@ -1,6 +1,6 @@
 
 # Desktox
-Desktox is a set of Lua graphics libraries for [ComputerCraft](computercraft.info). It aims to be fast, hackable, and easy to use.
+Desktox is a set of pure Lua graphics libraries for [ComputerCraft](http://computercraft.info). It aims to be fast, hackable, and easy to use.
 
 ## Libraries
 Desktox consists of multiple (in)dependent packages.
@@ -15,7 +15,10 @@ An event handling library.
 A GUI library utilising `desktox-buffer` and `desktox-handler`, contains a set of graphical UI elements.
 
 ### `desktox-utils`
-Numerous utility functions shared among the other packages.
+Various utility functions shared among the other packages.
 
 ## Documentation
-The source code is documented in an [LDoc](https://github.com/stevedonovan/LDoc/) style. In the future, the documentation will be available online with [GitHub Pages](pages.github.com).
+The source code is documented in an [LDoc](https://github.com/stevedonovan/LDoc/) style. In the future, the documentation will be available online with [GitHub Pages](https://pages.github.com).
+
+## License
+Desktox is a work of Andrew Kvapil, also known as viluon, copyleft 2016, all rights reversed. All packages of Desktox are available under the [Mozilla Public License 2.0](https://www.mozilla.org/en-US/MPL/2.0/) unless stated otherwise.
