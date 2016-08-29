@@ -74,7 +74,7 @@ local unable_to_set_optional_argument = "Unable to set optional argument "
 local max   = require( "desktox-utils" ).max
 local round = require( "desktox-utils" ).round
 
-local log, close_log = require( "desktox-utils" ).open_log_file( "/log.txt" )
+--local log, close_log = require( "desktox-utils" ).open_log_file( "/log.txt" )
 
 --- Resize the buffer.
 -- @param width				(Optional) The desired new width, defaults to self.width
@@ -396,8 +396,8 @@ end
 -- @param y			(Optional) The y coordinate in target to render self at, 1-based, defaults to self.y1 + 1
 -- @return self
 function buffer_methods:render_to_window( target, x, y )
-	x = x or self.x1 + 1
-	y = y and y - 1 or self.y1
+	x = x or ( self.x1 and self.x1 + 1 or error( unable_to_set_optional_argument .. "'x': self.x1 is nil", 2 ) )
+	y = y and y - 1 or ( self.y1       or error( unable_to_set_optional_argument .. "'y': self.y1 is nil", 2 ) )
 
 	local scp, blit = target.setCursorPos, target.blit
 
@@ -412,34 +412,201 @@ function buffer_methods:render_to_window( target, x, y )
 end
 
 --- Cook the buffer data into an array of blitable lines.
+-- @param target	(Optional) The target buffer to use for transparency resolution, defaults to self.parent
 -- @param start_x	(Optional) The x coordinate to start reading data at, 0-based, defaults to 0
 -- @param start_y	(Optional) The y coordinate to start reading data at, 0-based, defaults to 0
 -- @param end_x		(Optional) The x coordinate to end reading data at, 0-based, defaults to self.width - 1
 -- @param end_y		(Optional) The y coordinate to end reading data at, 0-based, defaults to self.height - 1
 -- @return lines An array of lines, where every line = { background_colours, foreground_colours, text }
-function buffer_methods:cook_lines( start_x, start_y, end_x, end_y )
+function buffer_methods:cook_lines( target, start_x, start_y, end_x, end_y )
+	target = target or self.parent --or error( unable_to_set_optional_argument .. "'target': self.parent is nil", 2 )
+
 	local lines = {}
 	local i = 1
 
-	local w, h = self.width, self.height
+	local h = self.height
+
+	local self_width = self.width
+	-- This avoids attempts to something something nil while enabling a nil parent
+	local target_width = target and target.width or 0
 
 	start_x = start_x or 0
 	start_y = start_y or 0
-	end_x = end_x or w - 1
+	end_x = end_x or self_width - 1
 	end_y = end_y or h - 1
+
+	-- Will be explained further down
+	-- (in case target is nil, transparency resolution will exit cleanly)
+	local false_parent = { parent = target }
 
 	-- Go through all lines
 	for y = start_y, end_y do
 		local line = { "", "", "" }
-		local line_offset = y * w
+		local line_offset = y * self_width
 
-		-- Add the pixel data to the end of the line
+		-- Cache the line position for both the target buffer and us
+		local target_offset = y * target_width
+		local local_offset  = y * self_width
+
 		for x = start_x, end_x do
-			local pixel = self[ line_offset + x ]
+			-- index is where we should store the resultant pixel in target
+			local index = target_offset + x
+			-- pixel is the data from our buffer
+			local pixel = self[ local_offset + x ]
 
-			line[ 1 ] = line[ 1 ] .. colour_lookup[ pixel[ 1 ] ]
-			line[ 2 ] = line[ 2 ] .. colour_lookup[ pixel[ 2 ] ]
-			line[ 3 ] = line[ 3 ] .. pixel[ 3 ]
+			-- Cache the contents for faster access
+			local pixel1, pixel2, pixel3 = pixel[ 1 ], pixel[ 2 ], pixel[ 3 ]
+
+			-- Set the pixel in target, resolving transparency along the way
+			if pixel1 < 0 or pixel2 < 0 or pixel3 == TRANSPARENT_CHARACTER then
+				local local_parent = false_parent
+
+				local background_colour = pixel1
+				local foreground_colour = pixel2
+				local character = pixel3
+
+				local tracked_offset_x = x
+				local tracked_offset_y = y
+
+				-- Not only we have to get to the non-transparent colour
+				-- when the background_colour is transparent, we also have
+				-- to resolve the colour if the *foreground* uses it
+
+				if background_colour < 0 or pixel2 == TRANSPARENT_BACKGROUND then
+					local tracked_colour = -1
+
+					-- Down into the rabbit hole we go. One parent level further with every iteration.
+					-- We have to let the loop run at least once, for the TRANSPARENT_BACKGROUND to resolve
+					repeat
+						-- This wouldn't work the first time (when the loop starts), that's
+						-- why we defined local_parent to be the false_parent
+						local_parent = local_parent.parent
+
+						if not local_parent then
+							-- We've reached the very bottom of the family stack, without luck
+							-- Note that this also happens in case the target is nil, which
+							-- is frequent for top-level buffers
+							background_colour = DEFAULT_BACKGROUND
+							break
+						end
+
+						-- All buffers have a position, we have to keep track of that
+						tracked_offset_x = tracked_offset_x + local_parent.x1
+						tracked_offset_y = tracked_offset_y + local_parent.y1
+
+						local actual_y = y + tracked_offset_y
+						local actual_x = x + tracked_offset_x
+						local p_width  = local_parent.width
+						local p_height = local_parent.height
+
+						-- Check that we are within bounds
+						-- We could subtract a 1 in the local definition above, but if actual_x < 0 then the operation
+						-- doesn't even happen :P
+						if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
+							-- We can't get a pixel out of bounds of this parent, so we'll just roll with
+							-- the default colour.
+							--TODO: Would it be better if we'd look for any parent that *is* within bounds instead?
+							--      Probably not, the result isn't visible anyway since that part of self is outside
+							--      of the parent
+							background_colour = DEFAULT_BACKGROUND
+							break
+						end
+
+						background_colour = local_parent[ actual_y * p_width + actual_x ][ -tracked_colour ]
+						tracked_colour = background_colour
+
+					until background_colour > 0
+				end
+
+				-- The same goes for foreground colour...
+				if foreground_colour < 0 or pixel1 == TRANSPARENT_FOREGROUND then
+					local_parent = false_parent
+					tracked_offset_x = x
+					tracked_offset_y = y
+
+					local tracked_colour = -2
+
+					repeat
+						local_parent = local_parent.parent
+
+						if not local_parent then
+							foreground_colour = DEFAULT_FOREGROUND
+							break
+						end
+
+						tracked_offset_x = tracked_offset_x + local_parent.x1
+						tracked_offset_y = tracked_offset_y + local_parent.y1
+
+						local actual_y = y + tracked_offset_y
+						local actual_x = x + tracked_offset_x
+						local p_width  = local_parent.width
+						local p_height = local_parent.height
+
+						if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
+							foreground_colour = DEFAULT_FOREGROUND
+							break
+						end
+
+						foreground_colour = local_parent[ actual_y * p_width + actual_x ][ -tracked_colour ]
+						tracked_colour = foreground_colour
+
+					until foreground_colour > 0
+				end
+
+				-- ...And finally for the character.
+				-- Note that a colour cannot be transparent to a character, so
+				-- there's no extra branch here
+				local_parent = false_parent
+				tracked_offset_x = x
+				tracked_offset_y = y
+
+				while character == TRANSPARENT_CHARACTER do
+					local_parent = local_parent.parent
+
+					if not local_parent then
+						character = DEFAULT_CHARACTER
+						break
+					end
+
+					tracked_offset_x = tracked_offset_x + local_parent.x1
+					tracked_offset_y = tracked_offset_y + local_parent.y1
+
+					local actual_y = y + tracked_offset_y
+					local actual_x = x + tracked_offset_x
+					local p_width = local_parent.width
+					local p_height = local_parent.height
+
+					if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
+						character = DEFAULT_CHARACTER
+						break
+					end
+
+					character = local_parent[ actual_y * p_width + actual_x ][ 3 ]
+				end
+
+				-- Now that we're certain we have non-transparent data, store them in a pixel
+				-- We *could* use -1 and -2 indices, but there will be a lot of cases where
+				-- one or both of them aren't used. Because creating arrays is faster
+				-- (array creation can utilise SETLIST while table creation can only use
+				-- SETTABLE) and this assignment has to be done for *all cases*, we'll limit
+				-- the math to the lines concatenation down below.
+				local underneath = {
+					background_colour;
+					foreground_colour;
+					character;
+				}
+
+				-- Assign the proper data to the rendered pixel
+				line[ 1 ] = line[ 1 ] .. colour_lookup[ pixel1 > 0 and pixel1 or underneath[ -pixel1 ] ]
+				line[ 2 ] = line[ 2 ] .. colour_lookup[ pixel2 > 0 and pixel2 or underneath[ -pixel2 ] ]
+				line[ 3 ] = line[ 3 ] .. ( pixel3 == TRANSPARENT_CHARACTER and underneath[ 3 ] or pixel3 )
+			else
+				-- That was quick! This is a speed up for the large number of cases
+				-- in which no transparency is used
+				line[ 1 ] = line[ 1 ] .. colour_lookup[ pixel1 ]
+				line[ 2 ] = line[ 2 ] .. colour_lookup[ pixel2 ]
+				line[ 3 ] = line[ 3 ] .. pixel3
+			end
 		end
 
 		lines[ i ] = line
