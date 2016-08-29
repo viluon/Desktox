@@ -50,7 +50,11 @@ while true do
 		local y = last_click_y - 1
 		local pixel = overlay_buf[ y * overlay_buf.width + x ]
 
-		info_text = x .. ":" .. y .. " = { " .. pixel[ 1 ] .. "; " .. pixel[ 2 ] .. "; '" .. pixel[ 3 ] .. "' }"
+		if pixel then
+			info_text = x .. ":" .. y .. " = { " .. pixel[ 1 ] .. "; " .. pixel[ 2 ] .. "; '" .. pixel[ 3 ] .. "' }"
+		else
+			info_text = "unable to fetch pixel data"
+		end
 
 	elseif ev[ 1 ] == "mouse_drag" then
 		overlay_buf.x1 = ev[ 3 ] - last_click_x

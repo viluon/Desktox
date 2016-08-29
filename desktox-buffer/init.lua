@@ -224,18 +224,13 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 		local local_offset  = _y * self_width
 
 		for _x = start_x, end_x do
-			-- index is where should we store the resultant pixel in target
+			-- index is where we should store the resultant pixel in target
 			local index = target_offset + _x
 			-- pixel is the data from our buffer
 			local pixel = self[ local_offset + _x ]
 
 			-- Cache the contents for faster access
 			local pixel1, pixel2, pixel3 = pixel[ 1 ], pixel[ 2 ], pixel[ 3 ]
-
-			-- debug
-			if _y == 0 and _x == 0 then
-				log( pixel1, pixel2, pixel3 )
-			end
 
 			-- Set the pixel in target, resolving transparency along the way
 			if pixel1 < 0 or pixel2 < 0 or pixel3 == TRANSPARENT_CHARACTER then
@@ -252,13 +247,12 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 				-- when the background_colour is transparent, we also have
 				-- to resolve the colour if the *foreground* uses it
 
-				--TODO: background_colour < 0 or == TRANSPARENT_BACKGROUND ?
 				if background_colour < 0 or pixel2 == TRANSPARENT_BACKGROUND then
-					-- We have to let the loop run at least once, for the TRANSPARENT_BACKGROUND to resolve
-					local first_run = true
+					local tracked_colour = -1
 
 					-- Down into the rabbit hole we go. One parent level further with every iteration.
-					while background_colour < 0 or first_run do
+					-- We have to let the loop run at least once, for the TRANSPARENT_BACKGROUND to resolve
+					repeat
 						-- This wouldn't work the first time (when the loop starts), that's
 						-- why we defined local_parent to be the false_parent
 						local_parent = local_parent.parent
@@ -275,7 +269,7 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 
 						local actual_y = _y + tracked_offset_y
 						local actual_x = _x + tracked_offset_x
-						local p_width = local_parent.width
+						local p_width  = local_parent.width
 						local p_height = local_parent.height
 
 						-- Check that we are within bounds
@@ -291,14 +285,10 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 							break
 						end
 
-						background_colour = local_parent[ actual_y * p_width + actual_x ][ 1 ]
-						first_run = false
+						background_colour = local_parent[ actual_y * p_width + actual_x ][ -tracked_colour ]
+						tracked_colour = background_colour
 
-						-- debug
-						if _y == 0 and _x == 0 then
-							log( "Set background_colour to " .. background_colour )
-						end
-					end
+					until background_colour > 0
 				end
 
 				-- The same goes for foreground colour...
@@ -307,9 +297,9 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 					tracked_offset_x = x
 					tracked_offset_y = y
 
-					local first_run = true
+					local tracked_colour = -2
 
-					while foreground_colour < 0 or first_run do
+					repeat
 						local_parent = local_parent.parent
 
 						if not local_parent then
@@ -322,7 +312,7 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 
 						local actual_y = _y + tracked_offset_y
 						local actual_x = _x + tracked_offset_x
-						local p_width = local_parent.width
+						local p_width  = local_parent.width
 						local p_height = local_parent.height
 
 						if actual_x < 0 or actual_x > p_width - 1 or actual_y < 0 or actual_y > p_height - 1 then
@@ -330,9 +320,10 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 							break
 						end
 
-						foreground_colour = local_parent[ actual_y * p_width + actual_x ][ 2 ]
-						first_run = false
-					end
+						foreground_colour = local_parent[ actual_y * p_width + actual_x ][ -tracked_colour ]
+						tracked_colour = foreground_colour
+
+					until foreground_colour > 0
 				end
 
 				-- ...And finally for the character.
@@ -341,6 +332,7 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 				local_parent = false_parent
 				tracked_offset_x = x
 				tracked_offset_y = y
+
 				while character == TRANSPARENT_CHARACTER do
 					local_parent = local_parent.parent
 
@@ -407,8 +399,6 @@ function buffer_methods:render_to_window( target, x, y )
 	x = x or self.x1 + 1
 	y = y and y - 1 or self.y1
 
-	log( "Rendering to a window at " .. x .. ":" .. y )
-
 	local scp, blit = target.setCursorPos, target.blit
 
 	-- Go through all lines of the buffer
@@ -446,11 +436,6 @@ function buffer_methods:cook_lines( start_x, start_y, end_x, end_y )
 		-- Add the pixel data to the end of the line
 		for x = start_x, end_x do
 			local pixel = self[ line_offset + x ]
-
-			-- debug
-			if y == 0 and x == 0 then
-				log( "Cook job: got ", unpack( pixel ) )
-			end
 
 			line[ 1 ] = line[ 1 ] .. colour_lookup[ pixel[ 1 ] ]
 			line[ 2 ] = line[ 2 ] .. colour_lookup[ pixel[ 2 ] ]
