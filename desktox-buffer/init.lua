@@ -39,8 +39,13 @@ local table = table
 local colours = colours
 
 local floor = math.floor
+local max = math.max
+local min = math.min
+local abs = math.abs
 
-local colour_lookup = {
+local sub = string.sub
+
+local _colour_lookup = {
 	[ colours.white ]          = "0";
 	[ colours.orange ]         = "1";
 	[ colours.magenta ]        = "2";
@@ -57,12 +62,17 @@ local colour_lookup = {
 	[ colours.green ]          = "d";
 	[ colours.red ]            = "e";
 	[ colours.black ]          = "f";
+
+	-- Transparency
 	[ TRANSPARENT_BACKGROUND ] = "g";
 	[ TRANSPARENT_FOREGROUND ] = "h";
 }
 
+-- Weird LuaJ bug workaround here
+local colour_lookup = {}
 -- Reverse lookup
-for k, v in pairs( colour_lookup ) do
+for k, v in pairs( _colour_lookup ) do
+	colour_lookup[ k ] = v
 	colour_lookup[ v ] = k
 end
 
@@ -213,6 +223,12 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 	start_y = start_y or 0
 	end_x = end_x or self_width - 1
 	end_y = end_y or self.height - 1
+
+	-- Respect borders of the parent
+	start_x = max( start_x, -x )
+	start_y = max( start_y, -y )
+	end_x   = min( end_x, target_width  - x - 1 )
+	end_y   = min( end_y, target.height - y - 1 )
 
 	-- Will be explained further down
 	local false_parent = { parent = target }
@@ -419,7 +435,7 @@ end
 -- @param end_y		(Optional) The y coordinate to end reading data at, 0-based, defaults to self.height - 1
 -- @return lines An array of lines, where every line = { background_colours, foreground_colours, text }
 function buffer_methods:cook_lines( target, start_x, start_y, end_x, end_y )
-	target = target or self.parent --or error( unable_to_set_optional_argument .. "'target': self.parent is nil", 2 )
+	target = target or self.parent
 
 	local lines = {}
 	local i = 1
@@ -434,6 +450,14 @@ function buffer_methods:cook_lines( target, start_x, start_y, end_x, end_y )
 	start_y = start_y or 0
 	end_x = end_x or self_width - 1
 	end_y = end_y or h - 1
+
+	if target then
+		-- Respect borders of the target
+		start_x = max( start_x, -self.x )
+		start_y = max( start_y, -self.y )
+		end_x   = min( end_x, target_width  - self.x - 1 )
+		end_y   = min( end_y, target.height - self.y - 1 )
+	end
 
 	-- Will be explained further down
 	-- (in case target is nil, transparency resolution will exit cleanly)
@@ -484,7 +508,7 @@ function buffer_methods:cook_lines( target, start_x, start_y, end_x, end_y )
 
 						if not local_parent then
 							-- We've reached the very bottom of the family stack, without luck
-							-- Note that this also happens in case the target is nil, which
+							-- Note that this also happens in case the target is nil, as
 							-- is frequent for top-level buffers
 							background_colour = DEFAULT_BACKGROUND
 							break
@@ -636,10 +660,11 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 
 	x = x or 1
 	y = y or 1
-	width = width or self.width
+	width  = width  or self.width
 	height = height or self.height
 	-- Visibility defaults to false
-	visible = visible ~= nil and true or false
+	visible = visible and true or false
+
 	-- Colour defaults to parent.isColour()
 	if is_colour == nil then
 		is_colour = parent.isColour()
@@ -658,10 +683,9 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 		local x = cursor_x
 
 		local line_offset = ( cursor_y - 1 ) * width - 1
-		local sub = string.sub
 
 		for i = 1, #text do
-			if x - 1 > width then
+			if x > width then
 				break
 			end
 
@@ -971,17 +995,20 @@ function buffer_methods:blit( x, y, text, background_colours, foreground_colours
 	x = tonumber( x ) or error( "Expected number for 'x'", 2 )
 	y = tonumber( y ) or error( "Expected number for 'y'", 2 )
 
+	local w = self.width
+
 	local text_length = #text
 
 	if text_length ~= #background_colours or text_length ~= #foreground_colours then
 		error( "'text', 'background_colours', and 'foreground_colours' all have to be of the same length", 2 )
 	end
 
-	local offset = y * self.width + x
-	local sub = string.sub
+	local offset = y * w + x - 1
+	text_length  = min( text_length, w - x )
 
-	for i = 1, text_length do
-		self[ offset + i - 1 ] = {
+	for i = max( -x, 0 ) + 1, text_length do
+		-- A -1 for i is included in offset
+		self[ offset + i ] = {
 			colour_lookup[ sub( background_colours, i, i ) ];
 			colour_lookup[ sub( foreground_colours, i, i ) ];
 			sub( text, i, i );
@@ -1165,6 +1192,7 @@ end
 -- @return self
 function buffer_methods:draw_circle( centre_x, centre_y, radius, background_colour, foreground_colour, character )
 	local w = self.width
+	local self_height = self.height
 
 	local new_pixel = {
 		tonumber( background_colour ) or DEFAULT_BACKGROUND;
@@ -1179,14 +1207,72 @@ function buffer_methods:draw_circle( centre_x, centre_y, radius, background_colo
 	-- Generate points for the first octant, going counterclockwise
 	-- and mirroring them to other octants
 	while x >= y do
-		self[ ( centre_y + round( ( 2 / 3 ) * y ) ) * w + centre_x + x ] = new_pixel
-		self[ ( centre_y + round( ( 2 / 3 ) * x ) ) * w + centre_x + y ] = new_pixel
-		self[ ( centre_y + round( ( 2 / 3 ) * x ) ) * w + centre_x - y ] = new_pixel
-		self[ ( centre_y + round( ( 2 / 3 ) * y ) ) * w + centre_x - x ] = new_pixel
-		self[ ( centre_y - round( ( 2 / 3 ) * y ) ) * w + centre_x - x ] = new_pixel
-		self[ ( centre_y - round( ( 2 / 3 ) * x ) ) * w + centre_x - y ] = new_pixel
-		self[ ( centre_y - round( ( 2 / 3 ) * x ) ) * w + centre_x + y ] = new_pixel
-		self[ ( centre_y - round( ( 2 / 3 ) * y ) ) * w + centre_x + x ] = new_pixel
+		local this_point_y, this_point_x
+
+		-- Segment
+		this_point_y = ( centre_y + round( ( 2 / 3 ) * y ) )
+		this_point_x = centre_x + x
+
+		if this_point_y >= 0 and this_point_y < self_height and this_point_x >= 0 and this_point_x < w then
+			self[ this_point_y * w + this_point_x ] = new_pixel
+		end
+
+		-- Segment
+		this_point_y = ( centre_y + round( ( 2 / 3 ) * x ) )
+		this_point_x = centre_x + y
+
+		if this_point_y >= 0 and this_point_y < self_height and this_point_x >= 0 and this_point_x < w then
+			self[ this_point_y * w + this_point_x ] = new_pixel
+		end
+
+		-- Segment
+		this_point_y = ( centre_y + round( ( 2 / 3 ) * x ) )
+		this_point_x = centre_x - y
+
+		if this_point_y >= 0 and this_point_y < self_height and this_point_x >= 0 and this_point_x < w then
+			self[ this_point_y * w + this_point_x ] = new_pixel
+		end
+
+		-- Segment
+		this_point_y = ( centre_y + round( ( 2 / 3 ) * y ) )
+		this_point_x = centre_x - x
+
+		if this_point_y >= 0 and this_point_y < self_height and this_point_x >= 0 and this_point_x < w then
+			self[ this_point_y * w + this_point_x ] = new_pixel
+		end
+
+		-- Segment
+		this_point_y = ( centre_y - round( ( 2 / 3 ) * y ) )
+		this_point_x = centre_x - x
+
+		if this_point_y >= 0 and this_point_y < self_height and this_point_x >= 0 and this_point_x < w then
+			self[ this_point_y * w + this_point_x ] = new_pixel
+		end
+
+		-- Segment
+		this_point_y = ( centre_y - round( ( 2 / 3 ) * x ) )
+		this_point_x = centre_x - y
+
+		if this_point_y >= 0 and this_point_y < self_height and this_point_x >= 0 and this_point_x < w then
+			self[ this_point_y * w + this_point_x ] = new_pixel
+		end
+
+		-- Segment
+		this_point_y = ( centre_y - round( ( 2 / 3 ) * x ) )
+		this_point_x = centre_x + y
+
+		if this_point_y >= 0 and this_point_y < self_height and this_point_x >= 0 and this_point_x < w then
+			self[ this_point_y * w + this_point_x ] = new_pixel
+		end
+
+		-- Segment
+		this_point_y = ( centre_y - round( ( 2 / 3 ) * y ) )
+		this_point_x = centre_x + x
+
+		if this_point_y >= 0 and this_point_y < self_height and this_point_x >= 0 and this_point_x < w then
+			self[ this_point_y * w + this_point_x ] = new_pixel
+		end
+
 
 		y = y + 1
 		err = err + 1 + 2 * y
@@ -1194,6 +1280,78 @@ function buffer_methods:draw_circle( centre_x, centre_y, radius, background_colo
 		if 2 * ( err - x ) + 1 > 0 then
 			x = x - 1
 			err = err + 1 - 2 * x
+		end
+	end
+
+	return self
+end
+
+--- Draw a filled ellipse.
+--	Sorry for the inconsistency here, this code has been borrowed
+--	from Xenthera's graphics library
+-- @param x	description
+-- @param y	description
+-- @param width	description
+-- @param height	description
+-- @param background_colour	description
+-- @param foreground_colour	description
+-- @param character	description
+-- @return self
+function buffer_methods:draw_filled_ellipse( x, y, width, height, background_colour, foreground_colour, character )
+	local self_width  = self.width
+	local self_height = self.height
+
+	local hh = height * height
+	local ww = width * width
+	local hhww = hh * ww
+	local x0 = width - 1
+	local delta_x = 0
+
+	local new_pixel = {
+		tonumber( background_colour ) or DEFAULT_BACKGROUND;
+		tonumber( foreground_colour ) or DEFAULT_FOREGROUND;
+		character                     or DEFAULT_CHARACTER;
+	}
+
+	if y < self_height and y >= 0 then
+		local offset = y * self_width
+
+		for _x = max( x - width, 0 ), min( x + width, self_width - 1 ) do
+			self[ offset + _x ] = new_pixel
+		end
+	end
+
+	for _y = 0, height - 1 do
+		x1 = x0 - ( delta_x - 1 )
+
+		for i = x1, 0, -1 do
+			if ( x1 * x1 * hh + _y * _y * ww <= hhww ) then
+				break
+			end
+
+			x1 = x1 - 1
+		end
+
+		delta_x = x0 - x1
+		x0 = x1
+
+		local y_pos1 = y - _y
+		local y_pos2 = y + _y
+
+		if y_pos1 >= 0 and y_pos1 < self_height then
+			y_pos1 = y_pos1 * self_width
+
+			for _x = max( x - x0, 0 ), min( x + x0, self_width - 1 ) do
+				self[ y_pos1 + _x ] = new_pixel
+			end
+		end
+
+		if y_pos2 >= 0 and y_pos2 < self_height then
+			y_pos2 = y_pos2 * self_width
+
+			for _x = max( x - x0, 0 ), min( x + x0, self_width - 1 ) do
+				self[ y_pos2 + _x ] = new_pixel
+			end
 		end
 	end
 
@@ -1211,14 +1369,15 @@ function buffer_methods:write( x, y, text, background_colour, foreground_colour 
 	background_colour = background_colour or DEFAULT_BACKGROUND
 	foreground_colour = foreground_colour or DEFAULT_FOREGROUND
 
-	local line_offset = y * self.width + x - 1
-	local sub = string.sub
+	local width = self.width
+	local line_offset = y * width + x - 1
 	local last_pixel, last_char
 
 	-- Go through the string, writing the new pixels
-	for i = 1, #text do
+	for i = max( -x, 0 ) + 1, min( #text, width - x ) do
 		local char = sub( text, i, i )
 
+		-- Reduce memory usage whenever there are two identical characters
 		if char ~= last_char then
 			last_pixel = {
 				background_colour;
@@ -1230,7 +1389,9 @@ function buffer_methods:write( x, y, text, background_colour, foreground_colour 
 		end
 
 		-- A -1 for i is included in line_offset
-		self[ line_offset + i ] = last_pixel
+		local index = line_offset + i
+
+		self[ index ] = last_pixel
 	end
 
 	return self
@@ -1239,11 +1400,11 @@ end
 --- Fix errors in the buffer, such as missing pixels or unknown colours.
 --	Fixes the following:
 --	* Missing pixels
---	* Unknown colours
 --	* Strings longer than one character for pixel[3]
 --	* Missing or modified methods
 --	* Missing length
 --	* Missing x/y position
+--	* Unknown colours
 -- @param start_x			(Optional) The x coordinate to start repairing at, 0-based, defaults to 0
 -- @param start_y			(Optional) The y coordinate to start repairing at, 0-based, defaults to 0
 -- @param end_x				(Optional) The x coordinate to end repairing at, 0-based, defaults to self.width - 1
