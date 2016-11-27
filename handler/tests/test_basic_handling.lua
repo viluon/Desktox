@@ -1,6 +1,6 @@
 
-local handler = require "desktox-handler"
-local buffer  = require "desktox-buffer"
+local handler = require "desktox.handler"
+local buffer  = require "desktox.buffer"
 
 local terminal = term.current()
 local w, h = terminal.getSize()

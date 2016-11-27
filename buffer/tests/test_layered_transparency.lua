@@ -1,5 +1,5 @@
 
-local buffer = require "desktox-buffer"
+local buffer = require "desktox.buffer"
 
 local w, h = term.getSize()
 local terminal = term.current()

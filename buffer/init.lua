@@ -81,8 +81,8 @@ local unable_to_set_optional_argument = "Unable to set optional argument "
 
 -- Utility functions
 
-local max   = require( "desktox-utils" ).max
-local round = require( "desktox-utils" ).round
+local max   = require( "desktox.utils" ).max
+local round = require( "desktox.utils" ).round
 
 --local log, close_log = require( "desktox-utils" ).open_log_file( "/log.txt" )
 

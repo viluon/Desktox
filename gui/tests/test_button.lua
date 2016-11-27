@@ -1,6 +1,6 @@
 
-local buffer = require( "desktox-buffer" )
-local button = require( "desktox-gui.element.button" )
+local buffer = require( "desktox.buffer" )
+local button = require( "desktox.gui.element.button" )
 
 local old_term = term.current()
 local w, h = old_term.getSize()

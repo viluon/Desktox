@@ -1,5 +1,5 @@
 
-local buffer = require "desktox-buffer"
+local buffer = require "desktox.buffer"
 
 local b1 = buffer.new( 1, 1, 10, 10 )
 local b2 = buffer.new( 2, 1, 4, 2, b1, -2 )

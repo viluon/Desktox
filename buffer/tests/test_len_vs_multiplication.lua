@@ -1,5 +1,5 @@
 
-local buffer = require "desktox-buffer"
+local buffer = require "desktox.buffer"
 
 --- Clear the buffer.
 -- @param background_colour	(Optional) The background colour to clear with, defaults to DEFAULT_BACKGROUND

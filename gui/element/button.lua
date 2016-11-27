@@ -9,16 +9,16 @@
 --    License, v. 2.0. If a copy of the MPL was not distributed with this
 --    file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-local handler = require( "desktox-handler" )
-local text    = require( "desktox-gui.lib.text" )
+local handler = require( "desktox.handler" )
+local text    = require( "desktox.gui.lib.text" )
 
 local button = {}
 local button_methods = {}
 local button_metatable = {}
 
 -- Utility functions
-local round = require( "desktox-utils" ).round
-local max   = require( "desktox-utils" ).max
+local round = require( "desktox.utils" ).round
+local max   = require( "desktox.utils" ).max
 
 --- Draw the button to a buffer.
 -- @param target	(Optional) The target buffer, defaults to self.parent
