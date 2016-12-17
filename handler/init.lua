@@ -2,7 +2,7 @@
 -- Desktox
 --  A set of graphics libraries for ComputerCraft by @viluon <viluon@espiv.net>
 
---   desktox-handler
+--   desktox.handler
 --    The Desktox event handling library
 
 --    This Source Code Form is subject to the terms of the Mozilla Public
@@ -196,7 +196,7 @@ function handler_methods:handle_internal( event_name, event_args, is_global, sel
 	local x1 = self.x1
 	local y1 = self.y1
 
-	local x_pos, y_pos
+	local x_pos, y_pos, coord_info
 
 	if loc_info then
 		local x, y = loc_info.x, loc_info.y

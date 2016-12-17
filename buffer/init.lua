@@ -2,7 +2,7 @@
 -- Desktox
 --  A set of graphics libraries for ComputerCraft by @viluon <viluon@espiv.net>
 
---   desktox-buffer
+--   desktox.buffer
 --    The Desktox buffer library
 
 --    This Source Code Form is subject to the terms of the Mozilla Public

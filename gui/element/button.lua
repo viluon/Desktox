@@ -2,7 +2,7 @@
 -- Desktox
 --  A set of graphics libraries for ComputerCraft by @viluon <viluon@espiv.net>
 
---   desktox-gui.button
+--   desktox.gui.button
 --    The Desktox GUI library - the button element
 
 --    This Source Code Form is subject to the terms of the Mozilla Public
