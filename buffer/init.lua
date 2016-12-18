@@ -925,7 +925,7 @@ end
 function buffer_methods:clear_line( y, background_colour, foreground_colour, character, start_x, end_x )
 	y = tonumber( y ) or error( "Expected number for 'y'", 2 )
 
-	if y < 0 or y > self.height then
+	if y < 0 or y >= self.height then
 		return self
 	end
 
@@ -937,11 +937,11 @@ function buffer_methods:clear_line( y, background_colour, foreground_colour, cha
 
 	local w = self.width
 
-	start_x = tonumber( start_x ) or 0
-	end_x = tonumber( end_x ) or w - 1
+	start_x = max( tonumber( start_x ) or 0, 0 )
+	end_x = tonumber( end_x ) or w
 
 	-- Go through all pixels on this line and set them to clear_pixel
-	for x = start_x, end_x do
+	for x = start_x, min( end_x - start_x, w - 1 ) do
 		self[ y * w + x ] = clear_pixel
 	end
 
@@ -961,9 +961,11 @@ function buffer_methods:clear_column( x, background_colour, foreground_colour, c
 
 	local w = self.width
 
-	if x < 0 or x > w then
+	if x < 0 or x >= w then
 		return self
 	end
+
+	local h = self.height
 
 	local clear_pixel = {
 		tonumber( background_colour ) or DEFAULT_BACKGROUND;
@@ -971,11 +973,11 @@ function buffer_methods:clear_column( x, background_colour, foreground_colour, c
 		character                     or DEFAULT_CHARACTER;
 	}
 
-	start_y = tonumber( start_y ) or 0
-	end_y = tonumber( end_y ) or self.height - 1
+	start_y = max( tonumber( start_y ) or 0, 0 )
+	end_y = tonumber( end_y ) or h
 
 	-- Go through all pixels in this column and set them to clear_pixel
-	for y = start_y, end_y do
+	for y = start_y, min( end_y - start_y, h ) do
 		self[ y * w + x ] = clear_pixel
 	end
 
