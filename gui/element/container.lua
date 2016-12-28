@@ -2,8 +2,8 @@
 -- Desktox
 --  A set of graphics libraries for ComputerCraft by @viluon <viluon@espiv.net>
 
---   desktox.gui.button
---    The Desktox GUI library - the button element
+--   desktox.gui.container
+--    The Desktox GUI library - the container element
 
 --    This Source Code Form is subject to the terms of the Mozilla Public
 --    License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -11,28 +11,43 @@
 
 local handler = require( "desktox.handler" )
 local buffer  = require( "desktox.buffer" )
-local text    = require( "desktox.gui.lib.text" )
+
+local max = require( "desktox.utils" ).max
 
 local container = {}
 local container_methods = {}
+local container_metatable = {}
 
---- Create a new container using one point, width, and height.
--- @param x description
--- @param y description
--- @param width description
--- @param height description
--- @param parent description
--- @param background_colour description
--- @param foreground_colour description
--- @param text description
--- @return The new container object
-function container.new( x, y, width, height, parent, background_colour, foreground_colour, text )
+--- Create a new container using two points.
+-- @param x1	description
+-- @param y1	description
+-- @param x2	description
+-- @param y2	description
+-- @return The new container
+function container.new_from_points( x1, y1, x2, y2 )
 	local n = {}
 
-	-- Copy the container methods into this instance
-	for name, method in pairs( container_methods ) do
-		n[ name ] = method
-	end
+	x1 = x1 or 0
+	y1 = y1 or 0
+	x2 = x2 or 0
+	y2 = y2 or 0
+
+	-- Starting values must be smaller than ending ones
+	x2, x1 = max( x1, x2 )
+	y2, y1 = max( y1, y2 )
+
+	local width  = x2 - x1 + 1
+	local height = y2 - y1 + 1
+
+	n.x1 = x1
+	n.y1 = y1
+	n.x2 = x2
+	n.y2 = y2
+
+	n.width  = width
+	n.height = height
+
+	n.buffer = buffer.new_from_points( x1, y1, x2, y2 )
 
 	return n
 end

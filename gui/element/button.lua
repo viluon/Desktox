@@ -46,14 +46,14 @@ end
 -- @param y					The y coordinate of the button
 -- @param width				The width of the button
 -- @param height			The height of the button
--- @param parent			The parent element, a container or a buffer
+-- @param parent			The parent container
 -- @param background_colour	The background colour of the button
 -- @param foreground_colour	The foreground colour of the button
 -- @param text				The text displayed on the button
 -- @return Tail call of button.new_from_points, resulting in the new button
 -- @see button.new_from_points
-function button.new( x, y, width, height, parent, background_colour, foreground_colour, text )
-	return button.new_from_points( x, y, x + width - 1, y + height - 1, parent, background_colour, foreground_colour, text )
+function button.new( x, y, width, height, parent, background_colour, foreground_colour, text, existing_table )
+	return button.new_from_points( x, y, x + width - 1, y + height - 1, parent, background_colour, foreground_colour, text, existing_table )
 end
 
 --- Create a new button using two points.
@@ -61,12 +61,12 @@ end
 -- @param y1				The y coordinate of the first point
 -- @param x2				The x coordinate of the second point
 -- @param y2				The y coordinate of the second point
--- @param parent			The parent element, a container or a buffer
+-- @param parent			The parent container
 -- @param background_colour	The background colour of the button
 -- @param foreground_colour	The foreground colour of the button
 -- @param text				The text displayed on the button
 -- @return The new button
-function button.new_from_points( x1, y1, x2, y2, parent, background_colour, foreground_colour, text )
+function button.new_from_points( x1, y1, x2, y2, parent, background_colour, foreground_colour, text, existing_table )
 	-- Starting values must be smaller than ending ones
 	x2, x1 = max( x1, x2 )
 	y2, y1 = max( y1, y2 )
