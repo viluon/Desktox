@@ -28,4 +28,20 @@ function utils.round( n, places )
 	return floor( n * mult + 0.5 ) / mult
 end
 
+--- Open a file for logging.
+-- @param path	description
+-- @return A log() function which, when called, appends its arguments to the open log file,
+--         and another function which, when called, closes the file handle
+function utils.open_log_file( path )
+	local file = io.open( path, "a" )
+	local tconcat = table.concat
+
+	return function( ... )
+		file:write( tconcat( { ... }, ";" ) .. "\n" )
+		file:flush()
+	end, function()
+		file:close()
+	end
+end
+
 return utils

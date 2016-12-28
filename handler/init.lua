@@ -109,9 +109,9 @@ end
 -- @param event_name	The name of the event to handle
 -- @param local_only	If true, the event won't be propagated to child elements
 -- @param ...			The event's arguments
--- @return A tail call chain of handle_internal resulting in self
+-- @return event_name, event_args
 -- @see handler_methods:handle_internal
-function handler_methods:handle_and_return( event_name, ... )
+function handler_methods:handle_and_return( event_name, local_only, ... )
 	if type( event_name ) ~= "string" then
 		error( "Expected string as 'event_name'", 2 )
 	end
@@ -135,7 +135,7 @@ function handler_methods:handle_and_return( event_name, ... )
 		}
 	end
 
-	self:handle_internal( event_name, event_args, is_global, loc_info and loc_info.selects, loc_info, {}, {}, 0, self )
+	self:handle_internal( event_name, event_args, is_global, loc_info and loc_info.selects, loc_info, {}, {}, 0, self, local_only )
 
 	return event_name, event_args
 end
@@ -218,7 +218,7 @@ function handler_methods:handle_internal( event_name, event_args, is_global, sel
 	--TODO: pcall?
 	local fn = self.callbacks[ event_name ]
 	if fn then
-		fn( unpack( event_args ) )
+		fn( self, unpack( event_args ) )
 	end
 
 	if not local_only and self.family_callbacks[ event_name ] then

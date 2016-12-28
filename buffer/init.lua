@@ -43,7 +43,8 @@ local max = math.max
 local min = math.min
 local abs = math.abs
 
-local sub = string.sub
+local sub  = string.sub
+local gsub = string.gsub
 
 local _colour_lookup = {
 	[ colours.white ]          = "0";
@@ -84,7 +85,7 @@ local unable_to_set_optional_argument = "Unable to set optional argument "
 local max   = require( "desktox.utils" ).max
 local round = require( "desktox.utils" ).round
 
---local log, close_log = require( "desktox-utils" ).open_log_file( "/log.txt" )
+--local log, close_log = require( "desktox.utils" ).open_log_file( "/log.txt" )
 
 --- Resize the buffer.
 -- @param width				(Optional) The desired new width, defaults to self.width
@@ -183,7 +184,7 @@ function buffer_methods:clone( data )
 	-- Clone the pixel data
 	if data and type( data ) == "table" then
 		for i, pixel in ipairs( data ) do
-			clone[ i ] = {
+			clone[ i - 1 ] = {
 				pixel[ 1 ];
 				pixel[ 2 ];
 				pixel[ 3 ];
@@ -680,35 +681,54 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 	local cursor_y = 1
 
 	function win.write( text )
-		local x = cursor_x
+		local x_offset = cursor_x
 
 		local line_offset = ( cursor_y - 1 ) * width - 1
 
 		for i = 1, #text do
-			if x > width then
+			if x_offset > width then
 				break
 			end
 
-			-- A -1 for x is included in line_offset
-			self[ line_offset + x ] = { background_colour, text_colour, sub( text, i, i ) }
-			x = x + 1
+			-- A -1 for x_offset is included in line_offset
+			self[ line_offset + x_offset ] = { background_colour, text_colour, sub( text, i, i ) }
+			x_offset = x_offset + 1
 		end
 
-		cursor_x = x
+		if visible then
+			win.redraw()
+		end
+
+		cursor_x = x_offset
 	end
 
 	function win.blit( text, text_colours, background_colours )
-		self:blit( cursor_x - 1, cursor_y - 1, text, text_colours, background_colours )
+		self:blit( cursor_x - 1, cursor_y - 1, text, background_colours, text_colours )
+
+		if visible then
+			win.redraw()
+		end
+
 		return win
 	end
 
 	function win.clear()
 		self:clear( background_colour )
+
+		if visible then
+			win.redraw()
+		end
+
 		return win
 	end
 
 	function win.clearLine()
 		self:clear_line( cursor_y - 1 )
+
+		if visible then
+			win.redraw()
+		end
+
 		return win
 	end
 
@@ -739,6 +759,11 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 
 	function win.scroll( n )
 		self:scroll( n, background_colour )
+
+		if visible then
+			win.redraw()
+		end
+
 		return win
 	end
 
@@ -778,7 +803,7 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 
 	function win.redraw()
 		if visible then
-			self:render_to_window( parent, x - 1, y - 1 )
+			self:render_to_window( parent, x, y )
 		end
 
 		return win
@@ -1004,6 +1029,9 @@ function buffer_methods:blit( x, y, text, background_colours, foreground_colours
 	if text_length ~= #background_colours or text_length ~= #foreground_colours then
 		error( "'text', 'background_colours', and 'foreground_colours' all have to be of the same length", 2 )
 	end
+
+	background_colours = gsub( background_colours, "%s", "f" )
+	foreground_colours = gsub( foreground_colours, "%s", "0" )
 
 	local offset = y * w + x - 1
 	text_length  = min( text_length, w - x )
@@ -1511,7 +1539,7 @@ end
 function buffer_methods:iter( start_x, start_y, end_x, end_y )
 	local w = self.width
 
-	local x = start_x - 1 or -1
+	local x = ( start_x or 0 ) - 1
 	local y = start_y or 0
 
 	end_x   = end_x   or self.width - 1
@@ -1522,10 +1550,10 @@ function buffer_methods:iter( start_x, start_y, end_x, end_y )
 	return function()
 		x = x + 1
 
-		if x >= end_x then
+		if x > end_x then
 			y = y + 1
 
-			if y >= end_y then
+			if y > end_y then
 				return nil
 			end
 
