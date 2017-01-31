@@ -11,6 +11,12 @@
 
 -- In case you'd forget, pixels are stored as { background_colour, foreground_colour, character }
 
+--[[ DEBUG
+local clock = os.clock
+local time_spent_cooking = 0
+local time_spent_blitting = 0
+--]]
+
 local buffer = {}
 
 local buffer_methods = {}
@@ -43,6 +49,7 @@ local tconcat = table.concat
 
 local sub  = string.sub
 local gsub = string.gsub
+local char = string.char
 
 local _colour_lookup = {
 	[ colours.white ]          = "0";
@@ -85,6 +92,65 @@ local max   = require( "desktox.utils" ).max
 local round = require( "desktox.utils" ).round
 
 --local log, close_log = require( "desktox.utils" ).open_log_file( "/log.txt" )
+
+--- Get a teletext subpixel character from data for 6 pixels
+-- @param top_left		A boolean indicating whether the relevant subpixel is set
+-- @param top_right		A boolean indicating whether the relevant subpixel is set
+-- @param left			A boolean indicating whether the relevant subpixel is set
+-- @param right			A boolean indicating whether the relevant subpixel is set
+-- @param bottom_left	A boolean indicating whether the relevant subpixel is set
+-- @param bottom_right	A boolean indicating whether the relevant subpixel is set
+-- @return The character followed by a flag determining whether the background
+--         and foreground colours should be inverted.
+local function shrink_to_character( top_left, top_right, left, right, bottom_left, bottom_right )
+	local data = 128
+
+	if not bottom_right then
+		if top_left then
+			data = data + 1
+		end
+
+		if top_right then
+			data = data + 2
+		end
+
+		if left then
+			data = data + 4
+		end
+
+		if right then
+			data = data + 8
+		end
+
+		if bottom_left then
+			data = data + 16
+		end
+
+	else
+		if not top_left then
+			data = data + 1
+		end
+
+		if not top_right then
+			data = data + 2
+		end
+
+		if not left then
+			data = data + 4
+		end
+
+		if not right then
+			data = data + 8
+		end
+
+		if not bottom_left then
+			data = data + 16
+		end
+
+	end
+
+	return char( data ), bottom_right
+end
 
 --- Resize the buffer.
 -- @param width				(Optional) The desired new width, defaults to self.width
@@ -148,6 +214,9 @@ function buffer_methods:resize( width, height, background_colour, foreground_col
 	self.width = width
 	self.height = height
 	self.length = width * height - 1
+
+	self.x2 = self.x1 + width  - 1
+	self.y2 = self.y1 + height - 1
 
 	return self
 end
@@ -283,7 +352,10 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 			local pixel1, pixel2, pixel3 = pixel[ 1 ], pixel[ 2 ], pixel[ 3 ]
 
 			-- Set the pixel in target, resolving transparency along the way
-			if pixel1 < 0 or pixel2 < 0 or pixel3 == TRANSPARENT_CHARACTER then
+			if pixel1 == TRANSPARENT_BACKGROUND and pixel2 == TRANSPARENT_FOREGROUND and pixel3 == TRANSPARENT_CHARACTER then
+				-- We actually don't have to draw anything anywhere - this pixel has no effect on the parent
+
+			elseif pixel1 < 0 or pixel2 < 0 or pixel3 == TRANSPARENT_CHARACTER then
 				local local_parent = false_parent
 
 				local background_colour = pixel1
@@ -341,7 +413,7 @@ function buffer_methods:render( target, x, y, start_x, start_y, end_x, end_y )
 					until background_colour > 0
 				end
 
-				-- The same goes for foreground colour...
+				-- The same goes for the foreground colour...
 				if foreground_colour < 0 or pixel1 == TRANSPARENT_FOREGROUND then
 					local_parent = false_parent
 					tracked_offset_x = x
@@ -459,7 +531,13 @@ function buffer_methods:render_to_window( target, x, y, visible )
 	end
 
 	-- Go through all lines of the buffer
+	--local before_cook = clock()
+
 	local lines = self:cook_lines()
+
+	--local before_blit = clock()
+	--time_spent_cooking = time_spent_cooking + before_blit - before_cook
+
 	local line = 0
 
 	for i = 1, #lines, 3 do
@@ -468,6 +546,8 @@ function buffer_methods:render_to_window( target, x, y, visible )
 
 		line = line + 1
 	end
+
+	--time_spent_blitting = time_spent_blitting + clock() - before_blit
 
 	if visible == true and set_visible then
 		set_visible( true )
@@ -503,10 +583,10 @@ function buffer_methods:cook_lines( target, start_x, start_y, end_x, end_y )
 
 	if target then
 		-- Respect borders of the target
-		start_x = max( start_x, -self.x )
-		start_y = max( start_y, -self.y )
-		end_x   = min( end_x, target_width  - self.x - 1 )
-		end_y   = min( end_y, target.height - self.y - 1 )
+		start_x = max( start_x, -self.x1 )
+		start_y = max( start_y, -self.y1 )
+		end_x   = min( end_x, target_width  - self.x1 - 1 )
+		end_y   = min( end_y, target.height - self.y1 - 1 )
 	end
 
 	-- Will be explained further down
@@ -522,7 +602,7 @@ function buffer_methods:cook_lines( target, start_x, start_y, end_x, end_y )
 		local line_index = 1
 
 		-- Cache the line position
-		local local_offset  = y * self_width
+		local local_offset = y * self_width
 
 		for x = start_x, end_x do
 			-- pixel is the data from our buffer
@@ -673,7 +753,7 @@ function buffer_methods:cook_lines( target, start_x, start_y, end_x, end_y )
 				-- Assign the proper data to the rendered pixel
 				line1[ line_index ] = colour_lookup[ pixel1 > 0 and pixel1 or underneath[ -pixel1 ] ]
 				line2[ line_index ] = colour_lookup[ pixel2 > 0 and pixel2 or underneath[ -pixel2 ] ]
-				line3[ line_index ] = ( pixel3 == TRANSPARENT_CHARACTER and underneath[ 3 ] or pixel3 )
+				line3[ line_index ] = ( pixel3 == TRANSPARENT_CHARACTER   and underneath[ 3 ] or pixel3 )
 			else
 				-- That was quick! This is a speed up for the large number of cases
 				-- in which no transparency is used
@@ -749,18 +829,20 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 			x_offset = x_offset + 1
 		end
 
+		cursor_x = x_offset
+
 		if visible then
-			win.redraw()
+			return win.redraw()
 		end
 
-		cursor_x = x_offset
+		return win
 	end
 
 	function win.blit( text, text_colours, background_colours )
 		self:blit( cursor_x - 1, cursor_y - 1, text, background_colours, text_colours )
 
 		if visible then
-			win.redraw()
+			return win.redraw()
 		end
 
 		return win
@@ -770,7 +852,7 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 		self:clear( background_colour )
 
 		if visible then
-			win.redraw()
+			return win.redraw()
 		end
 
 		return win
@@ -780,7 +862,7 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 		self:clear_line( cursor_y - 1 )
 
 		if visible then
-			win.redraw()
+			return win.redraw()
 		end
 
 		return win
@@ -815,7 +897,7 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 		self:scroll( n, background_colour )
 
 		if visible then
-			win.redraw()
+			return win.redraw()
 		end
 
 		return win
@@ -847,8 +929,9 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 	function win.setVisible( visibility )
 		if visible ~= visibility then
 			visible = visibility
+
 			if visible then
-				win.redraw()
+				return win.redraw()
 			end
 		end
 
@@ -895,7 +978,7 @@ function buffer_methods:get_window_interface( parent, x, y, width, height, visib
 		end
 
 		if visible then
-			win.redraw()
+			return win.redraw()
 		end
 
 		return win
@@ -1020,7 +1103,7 @@ function buffer_methods:clear_line( y, background_colour, foreground_colour, cha
 	end_x = tonumber( end_x ) or w
 
 	-- Go through all pixels on this line and set them to clear_pixel
-	for x = start_x, min( end_x - start_x, w - 1 ) do
+	for x = start_x, min( end_x, w - 1 ) do
 		self[ y * w + x ] = clear_pixel
 	end
 
@@ -1056,7 +1139,7 @@ function buffer_methods:clear_column( x, background_colour, foreground_colour, c
 	end_y = tonumber( end_y ) or h
 
 	-- Go through all pixels in this column and set them to clear_pixel
-	for y = start_y, min( end_y - start_y, h ) do
+	for y = start_y, min( end_y, h ) do
 		self[ y * w + x ] = clear_pixel
 	end
 
@@ -1170,7 +1253,7 @@ end
 -- @param start_y			The y coordinate to start drawing at, 0-based
 -- @param end_x				The x coordinate to end drawing at, 0-based
 -- @param end_y				The y coordinate to end drawing at, 0-based
--- @param border_width		(Optional) The width of the border (larger values extending to the centre)
+-- @param border_width		(Optional) The width of the border (larger values extending to the centre), defaults to 1
 -- @param background_colour	(Optional) The background colour to fill the rectangle border with, defaults to DEFAULT_BACKGROUND
 -- @param foreground_colour	(Optional) The foreground colour to fill the rectangle border with, defaults to DEFAULT_FOREGROUND
 -- @param character			(Optional) The character to fill the rectangle border with, defaults to DEFAULT_CHARACTER
@@ -1526,29 +1609,31 @@ function buffer_methods:repair( start_x, start_y, end_x, end_y, background_colou
 		for x = start_x, end_x do
 			local pixel = self[ line_offset + x ]
 
-			if type( pixel ) ~= "table" then
-				-- The pixel is not here at all, set it to a blank pixel
-				n_errors = n_errors + 1
-				self[ line_offset + x ] = new_pixel
-
-			elseif not corrected_pixels[ pixel ] then
-				-- The pixel is here, check all data
-				if type( pixel[ 1 ] ) ~= "number" or not colour_lookup[ pixel[ 1 ] ] then
+			if not pixel or not corrected_pixels[ pixel ] then
+				if type( pixel ) ~= "table" then
+					-- The pixel is not here at all, set it to a blank pixel
 					n_errors = n_errors + 1
-					pixel[ 1 ] = background_colour
-				end
+					self[ line_offset + x ] = new_pixel
 
-				if type( pixel[ 2 ] ) ~= "number" or not colour_lookup[ pixel[ 2 ] ] then
-					n_errors = n_errors + 1
-					pixel[ 2 ] = foreground_colour
-				end
+				else
+					-- The pixel is here, check all data
+					if type( pixel[ 1 ] ) ~= "number" or not colour_lookup[ pixel[ 1 ] ] then
+						n_errors = n_errors + 1
+						pixel[ 1 ] = background_colour
+					end
 
-				if type( pixel[ 3 ] ) ~= "string" or #pixel[ 3 ] ~= 1 then
-					n_errors = n_errors + 1
-					pixel[ 3 ] = character
-				end
+					if type( pixel[ 2 ] ) ~= "number" or not colour_lookup[ pixel[ 2 ] ] then
+						n_errors = n_errors + 1
+						pixel[ 2 ] = foreground_colour
+					end
 
-				corrected_pixels[ pixel ] = true
+					if type( pixel[ 3 ] ) ~= "string" or #pixel[ 3 ] ~= 1 then
+						n_errors = n_errors + 1
+						pixel[ 3 ] = character
+					end
+
+					corrected_pixels[ pixel ] = true
+				end
 			end
 		end
 	end
@@ -1618,6 +1703,25 @@ function buffer_methods:iter( start_x, start_y, end_x, end_y )
 
 		return self[ index ], x, y, index
 	end
+end
+
+--- Shrink the buffer contents using teletext characters from CC 1.76+
+-- @param target	(Optional) The target buffer, defaults to self.parent
+-- @param x			(Optional) The x coordinate in target to shrink self to, 0-based, defaults to self.x1
+-- @param y			(Optional) The y coordinate in target to shrink self to, 0-based, defaults to self.y1
+-- @param start_x	(Optional) The x coordinate in self to start shrinking from, 0-based, defaults to 0
+-- @param start_y	(Optional) The y coordinate in self to start shrinking from, 0-based, defaults to 0
+-- @param end_x		(Optional) The x coordinate in self to stop shrinking at, 0-based, defaults to self.width - 1
+-- @param end_y		(Optional) The y coordinate in self to stop shrinking at, 0-based, defaults to self.height - 1
+-- @return self
+function buffer_methods:shrink( target, x, y, start_x, start_y, end_x, end_y )
+	target = target or self.parent or error( unable_to_set_optional_argument .. "'target': self.parent is nil", 2 )
+	x      = x      or self.x1     or error( unable_to_set_optional_argument .. "'x': self.x1 is nil", 2 )
+	y      = y      or self.y1     or error( unable_to_set_optional_argument .. "'y': self.y1 is nil", 2 )
+
+	
+
+	return self
 end
 
 -- Aliases
@@ -1706,10 +1810,18 @@ function buffer.new_from_points( x1, y1, x2, y2, parent, background_colour, fore
 	n.parent = parent
 
 	-- Metadata
-	n.__type = "desktox-buffer"
+	n.__type = "desktox.buffer"
 
 	return n
 end
+
+--[[
+--- Get the telemetry data
+-- @return Time spent cooking lines and time spent blitting for :render_to_window()
+function buffer.get_telemetry()
+	return time_spent_cooking, time_spent_blitting
+end
+--]]
 
 -- Imports
 buffer.clone = buffer_methods.clone
@@ -1723,7 +1835,7 @@ buffer.repair = buffer_methods.repair
 -- @param ...		Any arguments passed to :render() or :render_to_window()
 -- @return Tail call of :render() or :render_to_window()
 function buffer_metatable:__call( target, ... )
-	if self.parent or ( type( target ) == "table" and target.__type == "desktox-buffer" ) then
+	if self.parent or ( type( target ) == "table" and target.__type == "desktox.buffer" ) then
 		return self:render( target, ... )
 	else
 		return self:render_to_window( target, ... )
@@ -1736,6 +1848,9 @@ buffer.methods = buffer_methods
 -- Export logging functions
 buffer.log = log
 buffer.close_log = close_log
+
+-- Export utility functions
+buffer.shrink_to_character = shrink_to_character
 
 -- Export the default values
 buffer.DEFAULT_BACKGROUND = DEFAULT_BACKGROUND
